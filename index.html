@@ -127,6 +127,7 @@
     color: var(--text-dim);
   }
 
+  [hidden] { display: none !important; }
   /* Sign-up */
   .signup { text-align: center; }
   .signup form {
@@ -284,7 +285,7 @@
 
 <script>
   // Paste the Google Apps Script web app URL here (ends in /exec).
-  const SIGNUP_URL = 'https://script.google.com/macros/s/AKfycbydQVoZzCJoxQAsSYh9u1Cl_n1vbbNbx64NqMqcTOT2B4Ftzk4ZKQcdsxYuR-YeCOut0w/exec';
+  const SIGNUP_URL = 'https://script.google.com/macros/s/AKfycbwJ6sxeslWD9xxgWzhAWfUS4c4Xg99NWmZ5sRiGHYLX6PCBt5Kw9hj3tnmXcupKVdd_sQ/exec';
 
   const form = document.getElementById('signup-form');
   const errorBox = document.getElementById('su-error');
@@ -307,14 +308,14 @@
     const btn = form.querySelector('button');
     btn.disabled = true; btn.textContent = 'Signing up…';
     data.append('page', location.href);
-    try {
-      await fetch(SIGNUP_URL, { method: 'POST', mode: 'no-cors', body: new URLSearchParams(data) });
-      showThanks();
-    } catch (err) {
-      errorBox.textContent = 'Something went wrong. Please try again.';
-      errorBox.hidden = false;
-      btn.disabled = false; btn.textContent = 'Sign up';
+    // Send and move on: Google saves the row as soon as it gets the request,
+    // so we don't wait for its (slow, redirected) reply.
+    const body = new URLSearchParams(data);
+    const queued = navigator.sendBeacon && navigator.sendBeacon(SIGNUP_URL, body);
+    if (!queued) {
+      fetch(SIGNUP_URL, { method: 'POST', mode: 'no-cors', keepalive: true, body }).catch(() => {});
     }
+    showThanks();
   });
 </script>
 </body>
