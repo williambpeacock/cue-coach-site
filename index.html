@@ -140,6 +140,7 @@
     border: 1px solid #3a3d42; background: var(--bg-soft); color: var(--text);
     font: inherit;
   }
+  .field .optional { font-weight: 400; opacity: 0.7; }
   .field input:focus, .choice input:focus-visible + span { outline: 2px solid var(--orange); outline-offset: 2px; }
   .signup fieldset { border: 0; }
   .choices { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -257,6 +258,16 @@
             <label class="choice"><input type="radio" name="role" value="Both"><span>Both</span></label>
           </div>
         </fieldset>
+        <div class="field">
+          <label for="su-cue">What cue do you shoot with? <span class="optional">(optional)</span></label>
+          <input id="su-cue" name="cue" type="text" list="su-cue-brands" autocomplete="off" maxlength="100" placeholder="Brand, or brand and model">
+          <datalist id="su-cue-brands">
+            <option value="Predator"><option value="Meucci"><option value="McDermott"><option value="Lucasi">
+            <option value="Viking"><option value="Schon"><option value="Mezz"><option value="Cuetec">
+            <option value="Jacoby"><option value="Pechauer"><option value="Players"><option value="Joss">
+            <option value="OB Cues"><option value="Poison"><option value="Lucasi Hybrid"><option value="Custom cue">
+          </datalist>
+        </div>
         <label class="check"><input type="checkbox" name="beta" value="yes"> I'm interested in being a beta tester</label>
         <div class="hp" aria-hidden="true"><label for="su-website">Website</label><input id="su-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
         <p class="err" id="su-error" role="alert" hidden></p>
