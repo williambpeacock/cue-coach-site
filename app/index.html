@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Coach</title>
+<!-- Players see their own strokes, coaches their linked players', admin everyone: Supabase's
+     row-level security decides, this page only asks. Config in config.js (see config.example.js);
+     ?mock=1 runs on web/mock/ data with no project. Same look as cue_coach_report.py. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1c1e22; --panel: #2a2a2e; --panel-2: #34343a; --line: #52525b;
+  --fg: #f4f4f5; --muted: #b4b4bb; --accent: #e8792e; --accent-ink: #1c1e22; --bad: #fca5a5;
+  --display: "Oswald", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+.page { max-width: 880px; margin: 0 auto; padding: 24px 16px 56px; display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px;
+  border-bottom: 2px solid var(--accent); padding-bottom: 12px; }
+.brand { font-family: var(--display); font-size: 14px; letter-spacing: 3px; color: var(--accent); }
+h1 { margin: 2px 0 0; font-family: var(--display); font-weight: 600; font-size: 32px; line-height: 1.1; }
+h2 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 20px; }
+.who { color: var(--muted); font-size: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.panel { background: var(--panel); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.card { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
+.label { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+.value { font-size: 18px; font-weight: 600; }
+.sub { color: var(--muted); font-size: 13px; }
+button, select, input { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.link { background: none; border: none; color: var(--accent); padding: 0; cursor: pointer; }
+form { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.chart { background: var(--panel-2); border-radius: 10px; padding: 10px; height: 200px; }
+.msg { color: var(--muted); } .err { color: var(--bad); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
+    <div class="who" id="who" hidden>
+      <select id="player" hidden aria-label="Player"></select>
+      <span id="me"></span><button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
+    </div>
+  </header>
+
+  <section class="panel" id="signin" hidden>
+    <h2>Sign in</h2>
+    <form id="signin-form">
+      <input id="email" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+      <button class="link" type="button" id="forgot">Forgot password?</button>
+      <div id="signin-msg" class="msg"></div>
+    </form>
+  </section>
+
+  <section class="panel" id="reset" hidden>
+    <h2>Choose a new password</h2>
+    <form id="reset-form">
+      <input id="new-password" type="password" placeholder="New password" autocomplete="new-password" minlength="8" required>
+      <button class="primary" type="submit">Save password</button>
+      <div id="reset-msg" class="msg"></div>
+    </form>
+  </section>
+
+  <div id="home" hidden>
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <section class="panel"><h2 id="latest-title">Latest session</h2><div class="cards" id="latest"></div></section>
+      <section class="panel"><h2>Week by week</h2><div class="charts">
+        <div class="chart"><canvas id="c-speed"></canvas></div>
+        <div class="chart"><canvas id="c-spread"></canvas></div>
+        <div class="chart"><canvas id="c-back"></canvas></div>
+        <div class="chart"><canvas id="c-yaw"></canvas></div>
+      </div></section>
+      <section class="panel"><h2>Sessions</h2><div class="table-wrap"><table id="sessions"></table></div></section>
+    </div>
+  </div>
+
+  <section class="panel" id="day" hidden>
+    <div><button class="link" id="back">← All sessions</button></div>
+    <h2 id="day-title"></h2>
+    <div class="table-wrap"><table id="strokes"></table></div>
+  </section>
+
+  <div id="status" class="msg"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
+<script>
+const MPH = 2.237;
+const mock = new URLSearchParams(location.search).has("mock");
+const $ = (id) => document.getElementById(id);
+const show = (...ids) => ["signin", "reset", "home", "day", "who"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
+const speed = (v) => (v == null || v <= 0 ? "–" : `${fmt(v, 2)} m/s · ${fmt(v * MPH, 1)} mph`);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const status = (text, bad) => { $("status").textContent = text || ""; $("status").className = bad ? "err" : "msg"; };
+
+// The data source: Supabase, or the mock files (same shapes as the views).
+let db = null, me = null, playerCode = null, charts = [];
+async function fromMock(name) { return (await fetch(`mock/${name}.json`)).json(); }
+async function rows(view, filter = {}) {
+  if (mock) return (await fromMock(view)).filter((r) => Object.entries(filter).every(([k, v]) => r[k] === v));
+  let q = db.from(view).select("*");
+  for (const [k, v] of Object.entries(filter)) q = q.eq(k, v);
+  const { data, error } = await q;
+  if (error) throw new Error(`${view}: ${error.message}`);
+  return data;
+}
+
+async function start() {
+  if (mock) { me = (await fromMock("profiles"))[0]; return signedIn(); }
+  if (window.CUE_CONFIG_MISSING || !window.CUE_CONFIG) return status("No config.js: copy config.example.js to config.js and fill it in (or add ?mock=1).", true);
+  const recovering = /type=recovery/.test(location.hash + location.search);  // read before the library clears it
+  db = supabase.createClient(CUE_CONFIG.SUPABASE_URL, CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY);
+  db.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") show("reset"); });
+  const { data: { session } } = await db.auth.getSession();
+  if (recovering && session) return show("reset");
+  if (!session) return show("signin");
+  const { data, error } = await db.from("profiles").select("*").eq("id", session.user.id).single();
+  if (error) return status(`Couldn't read your profile: ${error.message}`, true);
+  me = data;
+  signedIn();
+}
+
+async function signedIn() {
+  show("who", "home");
+  $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
+  $("signout").hidden = mock; $("setpw").hidden = mock;
+  // Coaches and admin pick a player; a player sees only themself.
+  let players = [me];
+  if (me.role !== "player") {
+    players = mock ? await fromMock("profiles") : (await db.from("profiles").select("id, player_code, display_name").not("player_code", "is", null).order("player_code")).data || [];
+    if (me.role === "coach" && !mock) {
+      const { data: links } = await db.from("coach_links").select("player_id").eq("coach_id", me.id);
+      const linked = new Set((links || []).map((l) => l.player_id));
+      players = players.filter((p) => linked.has(p.id));
+    }
+    $("player").innerHTML = players.map((p) => `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name)}</option>`).join("");
+    $("player").hidden = players.length < 2;
+  }
+  playerCode = (players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
+  if (!playerCode) return status("No players to show yet.");
+  $("player").value = playerCode;
+  loadPlayer();
+}
+
+async function loadPlayer() {
+  status("Loading…");
+  try {
+    const [sessions, weeks] = await Promise.all([rows("player_sessions", { player_code: playerCode }), rows("player_weeks", { player_code: playerCode })]);
+    sessions.sort((a, b) => (a.local_date < b.local_date ? 1 : -1));
+    weeks.sort((a, b) => (a.week_of > b.week_of ? 1 : -1));
+    const name = sessions[0]?.player || playerCode;
+    $("title").textContent = playerCode === me.player_code ? "Your stroke" : `${name}'s stroke`;
+    drawLatest(sessions[0]);
+    drawWeeks(weeks);
+    drawSessions(sessions);
+    show("who", "home");
+    status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
+  } catch (e) { status(e.message, true); }
+}
+
+function drawLatest(s) {
+  $("latest-title").textContent = s ? `Latest session · ${s.local_date}` : "Latest session";
+  if (!s) return ($("latest").innerHTML = "");
+  const card = (label, value, sub = "") => `<div class="card"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub}</div></div>`;
+  $("latest").innerHTML = [
+    card("Strokes", s.strokes, `${s.recordings} recordings`),
+    card("Speed", s.speed_avg_mps ? `${fmt(s.speed_avg_mps, 2)} m/s` : "–", s.speed_avg_mps ? `${fmt(s.speed_avg_mps * MPH)} mph · ±${fmt(s.speed_sd_mps, 2)}` : ""),
+    card("Hardest", s.speed_max_mps ? `${fmt(s.speed_max_mps, 2)} m/s` : "–", s.speed_max_mps ? `${fmt(s.speed_max_mps * MPH)} mph` : ""),
+    card("Backstroke", `${fmt(s.backstroke_avg_in)} in`, `±${fmt(s.backstroke_sd_in)} in`),
+    card("Follow-through", `${fmt(s.follow_through_avg_in)} in`),
+    card("Straightness", fmt(s.straightness_yaw_abs_avg, 2), "lower is straighter"),
+    card("Pause", `${fmt(s.pause_avg_s, 2)} s`, s.tempo_ratio_avg ? `tempo ${fmt(s.tempo_ratio_avg, 2)} : 1` : ""),
+  ].join("");
+}
+
+function drawWeeks(weeks) {
+  charts.forEach((c) => c.destroy());
+  const labels = weeks.map((w) => w.week_of.slice(5));
+  const line = (id, title, key) => new Chart($(id), {
+    type: "line",
+    data: { labels, datasets: [{ data: weeks.map((w) => w[key]), borderColor: "#e8792e", backgroundColor: "#e8792e", tension: 0.25, spanGaps: true }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: title, color: "#f4f4f5", align: "start" } },
+      scales: { x: { ticks: { color: "#b4b4bb" }, grid: { color: "#3a3a40" } }, y: { ticks: { color: "#b4b4bb" }, grid: { color: "#3a3a40" } } } },
+  });
+  charts = [
+    line("c-speed", "Speed (m/s)", "speed_avg_mps"),
+    line("c-spread", "Speed spread (m/s, lower = steadier)", "speed_sd_mps"),
+    line("c-back", "Backstroke (in)", "backstroke_avg_in"),
+    line("c-yaw", "Straightness (lower = straighter)", "straightness_yaw_abs_avg"),
+  ];
+}
+
+function drawSessions(sessions) {
+  $("sessions").innerHTML = "<tr><th>Date</th><th>Strokes</th><th>Speed m/s</th><th>± </th><th>Backstroke in</th><th>Straightness</th><th>Cue</th></tr>" +
+    sessions.map((s) => `<tr class="clickable" data-date="${s.local_date}"><td>${s.local_date}</td><td>${s.strokes}</td><td>${fmt(s.speed_avg_mps, 2)}</td><td>${fmt(s.speed_sd_mps, 2)}</td><td>${fmt(s.backstroke_avg_in)}</td><td>${fmt(s.straightness_yaw_abs_avg, 2)}</td><td style="text-align:left">${esc(s.cues)}</td></tr>`).join("");
+  $("sessions").querySelectorAll("tr.clickable").forEach((tr) => (tr.onclick = () => loadDay(tr.dataset.date)));
+}
+
+async function loadDay(date) {
+  status("Loading…");
+  try {
+    const strokes = (await rows("stroke_facts", { player_code: playerCode, local_date: date })).filter((s) => !s.error);
+    strokes.sort((a, b) => (a.recorded_at === b.recorded_at ? a.stroke_no - b.stroke_no : a.recorded_at < b.recorded_at ? -1 : 1));
+    $("day-title").textContent = `${date} · ${strokes.length} strokes`;
+    $("strokes").innerHTML = "<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Cue angle °</th><th>Pause s</th></tr>" +
+      strokes.map((s) => `<tr><td>${new Date(s.recorded_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td>${fmt(s.straightness_yaw, 2)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td></tr>`).join("");
+    show("who", "day");
+    status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
+  } catch (e) { status(e.message, true); }
+}
+
+$("signin-form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("signin-msg").textContent = "Signing in…";
+  const { error } = await db.auth.signInWithPassword({ email: $("email").value, password: $("password").value });
+  if (error) return ($("signin-msg").textContent = error.message);
+  $("signin-msg").textContent = "";
+  start();
+};
+$("forgot").onclick = async () => {
+  if (!$("email").value) return ($("signin-msg").textContent = "Type your email first.");
+  const { error } = await db.auth.resetPasswordForEmail($("email").value, { redirectTo: location.origin + location.pathname });
+  $("signin-msg").textContent = error ? error.message : "If that email has an account, a reset link is on its way.";
+};
+$("reset-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const { error } = await db.auth.updateUser({ password: $("new-password").value });
+  if (error) return ($("reset-msg").textContent = error.message);
+  history.replaceState(null, "", location.pathname);
+  start();
+};
+$("setpw").onclick = () => show("reset");
+$("signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
+$("player").onchange = () => { playerCode = $("player").value; loadPlayer(); };
+$("back").onclick = () => { show("who", "home"); status(""); };
+start();
+</script>
+</body>
+</html>
