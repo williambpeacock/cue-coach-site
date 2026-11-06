@@ -129,7 +129,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
       <label>Player code <input id="inv-code" placeholder="JK01" maxlength="4" autocomplete="off"></label>
       <label>Name <input id="inv-name" placeholder="Josh K" maxlength="100" autocomplete="off"></label>
       <label>Email <input id="inv-email" type="email" placeholder="josh@example.com" autocomplete="off" required></label>
-      <label>Role <select id="inv-role"><option value="">(keep / player)</option><option value="player">Player</option><option value="coach">Coach</option><option value="admin">Admin</option></select></label>
+      <label>Role <select id="inv-role"><option value="">(keep / player)</option><option value="player">Player</option><option value="coach">Coach</option><option value="admin">Admin</option><option value="staff">Staff (Leads page only)</option></select></label>
       <div class="buttons">
         <button class="primary" type="submit">Send invitation</button>
         <button type="button" id="inv-link">Make a link to send myself</button>
@@ -144,13 +144,14 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
   <section class="panel" id="leads" hidden>
     <div><button class="link" id="leads-back">← Strokes</button></div>
     <h2>Leads</h2>
-    <p class="small">Everyone who signed up on cue-coach.com. Status and notes are kept here; the Google Sheet stays as a backup.
-      Invite… turns a lead into a login (on the People page) and marks them invited.</p>
+    <p class="small">Everyone who signed up on cue-coach.com. Status and notes are kept here and saved as you change them.
+      <span class="admin-only">Invite… turns a lead into a login (on the People page) and marks them invited.</span></p>
     <div class="counts" id="lead-counts"></div>
     <div class="filters">
       <input type="search" id="lead-search" placeholder="Search name, email, cue, notes" aria-label="Search leads">
       <select id="lead-status" aria-label="Status"><option value="open">Open (not customer / not interested)</option><option value="">All</option></select>
       <label class="small"><input type="checkbox" id="lead-beta"> Beta testers only</label>
+      <button class="link" id="lead-csv" title="The leads shown, as a file a spreadsheet opens">Download CSV</button>
     </div>
     <div id="leads-msg" class="msg"></div>
     <div class="table-wrap"><table id="leads-table"></table></div>
@@ -194,7 +195,11 @@ async function rows(view, filter = {}) {
 }
 
 async function start() {
-  if (mock) { me = (await fromMock("profiles"))[0]; return signedIn(); }
+  if (mock) {  // ?mock=1&role=staff tries the page as another role
+    me = { ...(await fromMock("profiles"))[0] };
+    me.role = new URLSearchParams(location.search).get("role") || me.role;
+    return signedIn();
+  }
   if (window.CUE_CONFIG_MISSING || !window.CUE_CONFIG) return status("No config.js: copy config.example.js to config.js and fill it in (or add ?mock=1).", true);
   const recovering = /type=recovery/.test(location.hash + location.search);  // read before the library clears it
   db = supabase.createClient(CUE_CONFIG.SUPABASE_URL, CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY);
@@ -213,7 +218,9 @@ async function signedIn() {
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
   $("people-link").hidden = me.role !== "admin";
-  $("leads-link").hidden = me.role !== "admin";
+  $("leads-link").hidden = !["admin", "staff"].includes(me.role);
+  // Staff (2026-11-05) see the Leads page and nothing else: no strokes, no People page.
+  if (me.role === "staff") { $("leads-back").hidden = true; $("leads-link").hidden = true; return loadLeads(); }
   // Coaches and admin pick a player; a player sees only themself.
   let players = [me];
   if (me.role !== "player") {
@@ -331,7 +338,7 @@ async function loadPeople(note) {
   status("Loading…");
   try {
     const { people } = await peopleCall("GET");
-    const roles = ["player", "coach", "admin"];
+    const roles = ["player", "coach", "admin", "staff"];
     $("people-table").innerHTML = "<tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Login</th><th>Shots</th><th></th></tr>" +
       people.map((p) => `<tr data-id="${esc(p.id)}">
         <td>${esc(p.player_code ?? "")}</td><td>${esc(p.name)}</td><td>${esc(p.email ?? "")}</td>
@@ -384,8 +391,9 @@ $("link-copy").onclick = async () => { await navigator.clipboard.writeText($("li
 $("people-link").onclick = () => loadPeople();
 $("people-back").onclick = () => { show("who", "home"); loadPlayer(); };
 
-// ---- Admin: Leads (2026-11-05). Read and updated straight from the leads table: its database
-// rules let only admins in, and only status, notes and the login link change.
+// ---- Leads (2026-11-05), for admins and staff. Read and updated straight from the leads table:
+// its database rules let only admins and staff in, only status, notes and the login link change,
+// and only admins delete.
 const LEAD_STATUSES = [["new", "New"], ["contacted", "Contacted"], ["invited", "Invited"], ["tester", "Tester"], ["customer", "Customer"], ["not_interested", "Not interested"]];
 let leadRows = [], invitingLead = null;
 $("lead-status").innerHTML += LEAD_STATUSES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
@@ -415,6 +423,8 @@ function drawLeads() {
   const n = (f) => leadRows.filter(f).length;
   $("lead-counts").innerHTML = `<span><b>${leadRows.length}</b> leads</span><span><b>${n((l) => l.status === "new")}</b> new</span>` +
     `<span><b>${n((l) => l.beta)}</b> want to beta test</span><span><b>${n((l) => l.status === "tester")}</b> testers</span><span><b>${n((l) => l.status === "customer")}</b> customers</span>`;
+  const isAdmin = me.role === "admin";
+  document.querySelectorAll("#leads .admin-only").forEach((el) => (el.hidden = !isAdmin));
   $("leads-table").innerHTML = "<tr><th>Signed up</th><th>Name</th><th>Email</th><th>Is a</th><th>Beta</th><th>Cue</th><th>Status</th><th>Notes</th><th></th></tr>" +
     (shown.length ? "" : `<tr><td colspan="9" class="small">No leads match.</td></tr>`) +
     shown.map((l) => `<tr data-id="${esc(l.id)}">
@@ -423,15 +433,51 @@ function drawLeads() {
       <td>${esc(l.interest)}</td><td>${l.beta ? "Yes" : ""}</td><td>${esc(l.cue)}</td>
       <td><select class="lead-st">${LEAD_STATUSES.map(([v, t]) => `<option value="${v}" ${v === l.status ? "selected" : ""}>${t}</option>`).join("")}</select></td>
       <td><textarea class="lead-notes" maxlength="4000" aria-label="Notes">${esc(l.notes)}</textarea></td>
-      <td>${l.profile_id ? `<span class="small">Has a login</span>` : `<button class="link lead-invite">Invite…</button>`}</td></tr>`).join("");
+      <td>${l.profile_id ? `<span class="small">Has a login</span>` : isAdmin ? `<button class="link lead-invite">Invite…</button>` : ""}
+        ${isAdmin ? `<br><button class="link lead-delete" title="Remove this lead for good (a test, or they asked to be forgotten)">Delete</button>` : ""}</td></tr>`).join("");
   $("leads-table").querySelectorAll("tr[data-id]").forEach((tr) => {
     const l = leadRows.find((x) => x.id === tr.dataset.id);
     tr.querySelector(".lead-st").onchange = (e) => saveLead(l.id, { status: e.target.value });
     const notes = tr.querySelector(".lead-notes");
     notes.onchange = () => saveLead(l.id, { notes: notes.value });
     tr.querySelector(".lead-invite")?.addEventListener("click", () => inviteLead(l));
+    tr.querySelector(".lead-delete")?.addEventListener("click", () => deleteLead(l));
   });
+  leadsShown = shown;
 }
+let leadsShown = [];
+
+async function deleteLead(l) {
+  if (!confirm(`Delete ${l.name} <${l.email}> for good? This can't be undone. (Their login, if they have one, stays.)`)) return;
+  $("leads-msg").className = "msg";
+  try {
+    if (!mock) {
+      const { error, count } = await db.from("leads").delete({ count: "exact" }).eq("id", l.id);
+      if (error) throw new Error(error.message);
+      if (!count) throw new Error("not allowed");
+    }
+    leadRows = leadRows.filter((x) => x.id !== l.id);
+    drawLeads();
+    $("leads-msg").textContent = `Deleted ${l.name}.`;
+  } catch (e) { $("leads-msg").textContent = `Not deleted: ${e.message}`; $("leads-msg").className = "err"; }
+}
+
+/** The leads shown (search and filters applied) as a CSV file. */
+function downloadLeadsCsv() {
+  const cols = [["Signed up", (l) => l.first_seen_at], ["Last signed up", (l) => l.last_seen_at], ["Sign-ups", (l) => l.signups],
+    ["Name", (l) => l.name], ["Email", (l) => l.email], ["Is a", (l) => l.interest], ["Beta", (l) => (l.beta ? "yes" : "no")],
+    ["Cue", (l) => l.cue], ["Status", (l) => (LEAD_STATUSES.find(([v]) => v === l.status) || [, l.status])[1]],
+    ["Notes", (l) => l.notes], ["Page", (l) => l.page], ["Source", (l) => l.source]];
+  // Quoted; a leading = + - @ gets a ' so a spreadsheet shows it rather than running it.
+  const cell = (v) => { let t = String(v ?? ""); if (/^[=+\-@]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
+  const csv = [cols.map(([h]) => cell(h)).join(","), ...leadsShown.map((l) => cols.map(([, f]) => cell(f(l))).join(","))].join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
+  a.download = `cue-coach-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$("lead-csv").onclick = downloadLeadsCsv;
 
 async function saveLead(id, fields) {
   $("leads-msg").className = "msg";

@@ -306,7 +306,10 @@
 
 
 <script>
-  // Paste the Google Apps Script web app URL here (ends in /exec).
+  // Sign-ups go straight to Cue Coach's own database (Supabase), which emails each one (2026-11-05).
+  // For the first week they also still go to the Google Sheet, as a backup; the database counts
+  // the same sign-up once. To stop the Google copy: set SIGNUP_URL to ''.
+  const LEAD_URL = 'https://lmpzqwqifqqebynhikiy.supabase.co/functions/v1/lead';
   const SIGNUP_URL = 'https://script.google.com/macros/s/AKfycbwJ6sxeslWD9xxgWzhAWfUS4c4Xg99NWmZ5sRiGHYLX6PCBt5Kw9hj3tnmXcupKVdd_sQ/exec';
 
   const form = document.getElementById('signup-form');
@@ -330,14 +333,22 @@
     const btn = form.querySelector('button');
     btn.disabled = true; btn.textContent = 'Signing up…';
     data.append('page', location.href);
-    // Send and move on: Google saves the row as soon as it gets the request,
-    // so we don't wait for its (slow, redirected) reply.
-    // credentials: 'omit' keeps the visitor's own Google login out of the
-    // request; with it, Google can refuse when several accounts are signed in.
-    fetch(SIGNUP_URL, {
-      method: 'POST', mode: 'no-cors', credentials: 'omit', keepalive: true,
-      body: new URLSearchParams(data)
-    }).catch(() => {});
+    const body = new URLSearchParams(data);
+    // The Google copy: send and move on (its reply is slow and redirected). credentials: 'omit'
+    // keeps the visitor's own Google login out of it.
+    if (SIGNUP_URL) {
+      fetch(SIGNUP_URL, { method: 'POST', mode: 'no-cors', credentials: 'omit', keepalive: true, body }).catch(() => {});
+    }
+    // An ordinary form post (no custom headers), so the browser sends it without asking first.
+    try {
+      const res = await fetch(LEAD_URL, { method: 'POST', credentials: 'omit', keepalive: true, body });
+      if (res.status === 429) {
+        errorBox.textContent = 'Too many sign-ups from here just now. Please try again in an hour.';
+        errorBox.hidden = false;
+        btn.disabled = false; btn.textContent = 'Sign up';
+        return;
+      }
+    } catch (err) { /* the Google copy still has it */ }
     showThanks();
   });
 </script>
