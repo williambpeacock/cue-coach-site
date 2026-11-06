@@ -26,8 +26,18 @@
   }
   .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
 
+  /* "My Cue Coach": players and coaches sign in to their strokes (cue-coach.com/app). */
+  .account {
+    position: absolute; top: 16px; right: 16px;
+    padding: 8px 16px; border: 1px solid var(--orange); border-radius: 999px;
+    color: var(--orange); text-decoration: none; font-size: 0.9rem; font-weight: 600;
+  }
+  .account:hover, .account:focus-visible { background: var(--orange); color: var(--bg); }
+  footer a { color: var(--text-dim); }
+
   /* Hero */
   .hero {
+    position: relative;
     min-height: 88vh;
     display: flex;
     align-items: center;
@@ -168,6 +178,7 @@
 <body>
 
 <header class="hero">
+  <a class="account" href="app/">My Cue Coach</a>
   <div class="wrap">
     <img class="logo" src="Logo_4.0/CC_logo_4.0.svg" alt="Cue Coach">
     <h1>See every <span>stroke</span>.<br>Fix every flaw.</h1>
@@ -291,7 +302,7 @@
   </section>
 </main>
 
-<footer>&copy; 2026 Cue Coach · cue-coach.com</footer>
+<footer>&copy; 2026 Cue Coach · cue-coach.com · <a href="app/">My Cue Coach (sign in)</a></footer>
 
 
 <script>
