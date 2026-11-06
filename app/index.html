@@ -60,6 +60,14 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
 .small { font-size: 12px; color: var(--muted); }
 #people-table td, #people-table th { text-align: left; vertical-align: top; }
 #people-table select { padding: 4px 8px; }
+/* Admin Leads page (2026-11-05). */
+.filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.filters input[type=search] { flex: 1; min-width: 160px; }
+#leads-table td, #leads-table th { text-align: left; vertical-align: top; }
+#leads-table select { padding: 4px 8px; }
+#leads-table textarea { font: inherit; font-size: 13px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 160px; min-height: 34px; resize: vertical; }
+#leads-table a { color: var(--fg); }
+.counts { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; color: var(--muted); font-size: 14px; } .counts b { color: var(--fg); }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -69,7 +77,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <span id="me"></span><button class="link" id="people-link" hidden>People</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
+      <span id="me"></span><button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -133,6 +141,21 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
     <div class="table-wrap"><table id="people-table"></table></div>
   </section>
 
+  <section class="panel" id="leads" hidden>
+    <div><button class="link" id="leads-back">← Strokes</button></div>
+    <h2>Leads</h2>
+    <p class="small">Everyone who signed up on cue-coach.com. Status and notes are kept here; the Google Sheet stays as a backup.
+      Invite… turns a lead into a login (on the People page) and marks them invited.</p>
+    <div class="counts" id="lead-counts"></div>
+    <div class="filters">
+      <input type="search" id="lead-search" placeholder="Search name, email, cue, notes" aria-label="Search leads">
+      <select id="lead-status" aria-label="Status"><option value="open">Open (not customer / not interested)</option><option value="">All</option></select>
+      <label class="small"><input type="checkbox" id="lead-beta"> Beta testers only</label>
+    </div>
+    <div id="leads-msg" class="msg"></div>
+    <div class="table-wrap"><table id="leads-table"></table></div>
+  </section>
+
   <div id="status" class="msg"></div>
 </div>
 
@@ -152,7 +175,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "leads"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const speed = (v) => (v == null || v <= 0 ? "–" : `${fmt(v, 2)} m/s · ${fmt(v * MPH, 1)} mph`);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -190,6 +213,7 @@ async function signedIn() {
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
   $("people-link").hidden = me.role !== "admin";
+  $("leads-link").hidden = me.role !== "admin";
   // Coaches and admin pick a player; a player sees only themself.
   let players = [me];
   if (me.role !== "player") {
@@ -219,7 +243,7 @@ async function loadPlayer() {
     drawLatest(sessions[0]);
     drawWeeks(weeks);
     drawSessions(sessions);
-    if ($("people").hidden) show("who", "home");  // the People page opened meanwhile stays open
+    if ($("people").hidden && $("leads").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
@@ -342,6 +366,10 @@ async function act(body) {
   peopleMsg("Working…");
   try {
     const r = await peopleCall("POST", body);
+    if (body.action === "invite" && invitingLead) {
+      await saveLead(invitingLead, { status: "invited", profile_id: r.id });
+      invitingLead = null;
+    }
     await loadPeople();
     peopleMsg(r.link ? `${r.note}. This link works once and expires in about an hour: send it only to them.` : r.note, false, r.link);
   } catch (e) { peopleMsg(e.message, true); if (body.action === "role") loadPeople(); }
@@ -355,6 +383,92 @@ $("inv-link").onclick = () => { if ($("invite-form").reportValidity()) act(invit
 $("link-copy").onclick = async () => { await navigator.clipboard.writeText($("link-out").value); $("link-copy").textContent = "Copied"; setTimeout(() => ($("link-copy").textContent = "Copy"), 1500); };
 $("people-link").onclick = () => loadPeople();
 $("people-back").onclick = () => { show("who", "home"); loadPlayer(); };
+
+// ---- Admin: Leads (2026-11-05). Read and updated straight from the leads table: its database
+// rules let only admins in, and only status, notes and the login link change.
+const LEAD_STATUSES = [["new", "New"], ["contacted", "Contacted"], ["invited", "Invited"], ["tester", "Tester"], ["customer", "Customer"], ["not_interested", "Not interested"]];
+let leadRows = [], invitingLead = null;
+$("lead-status").innerHTML += LEAD_STATUSES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+
+async function loadLeads() {
+  show("who", "leads");
+  $("title").textContent = "Leads";
+  status("Loading…");
+  try {
+    if (mock) leadRows = await fromMock("leads");
+    else {
+      const { data, error } = await db.from("leads").select("*").order("last_seen_at", { ascending: false });
+      if (error) throw new Error(`leads: ${error.message}`);
+      leadRows = data;
+    }
+    drawLeads();
+    status("");
+  } catch (e) { status(e.message, true); }
+}
+
+function drawLeads() {
+  const q = $("lead-search").value.trim().toLowerCase(), st = $("lead-status").value, beta = $("lead-beta").checked;
+  const shown = leadRows.filter((l) =>
+    (st === "" || (st === "open" ? !["customer", "not_interested"].includes(l.status) : l.status === st)) &&
+    (!beta || l.beta) &&
+    (!q || [l.name, l.email, l.cue, l.notes, l.interest].join(" ").toLowerCase().includes(q)));
+  const n = (f) => leadRows.filter(f).length;
+  $("lead-counts").innerHTML = `<span><b>${leadRows.length}</b> leads</span><span><b>${n((l) => l.status === "new")}</b> new</span>` +
+    `<span><b>${n((l) => l.beta)}</b> want to beta test</span><span><b>${n((l) => l.status === "tester")}</b> testers</span><span><b>${n((l) => l.status === "customer")}</b> customers</span>`;
+  $("leads-table").innerHTML = "<tr><th>Signed up</th><th>Name</th><th>Email</th><th>Is a</th><th>Beta</th><th>Cue</th><th>Status</th><th>Notes</th><th></th></tr>" +
+    (shown.length ? "" : `<tr><td colspan="9" class="small">No leads match.</td></tr>`) +
+    shown.map((l) => `<tr data-id="${esc(l.id)}">
+      <td>${when(l.first_seen_at)}${l.signups > 1 ? ` <span class="small">×${l.signups}</span>` : ""}</td>
+      <td>${esc(l.name)}</td><td><a href="mailto:${esc(l.email)}">${esc(l.email)}</a></td>
+      <td>${esc(l.interest)}</td><td>${l.beta ? "Yes" : ""}</td><td>${esc(l.cue)}</td>
+      <td><select class="lead-st">${LEAD_STATUSES.map(([v, t]) => `<option value="${v}" ${v === l.status ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+      <td><textarea class="lead-notes" maxlength="4000" aria-label="Notes">${esc(l.notes)}</textarea></td>
+      <td>${l.profile_id ? `<span class="small">Has a login</span>` : `<button class="link lead-invite">Invite…</button>`}</td></tr>`).join("");
+  $("leads-table").querySelectorAll("tr[data-id]").forEach((tr) => {
+    const l = leadRows.find((x) => x.id === tr.dataset.id);
+    tr.querySelector(".lead-st").onchange = (e) => saveLead(l.id, { status: e.target.value });
+    const notes = tr.querySelector(".lead-notes");
+    notes.onchange = () => saveLead(l.id, { notes: notes.value });
+    tr.querySelector(".lead-invite")?.addEventListener("click", () => inviteLead(l));
+  });
+}
+
+async function saveLead(id, fields) {
+  $("leads-msg").className = "msg";
+  try {
+    if (!mock) {
+      const { error } = await db.from("leads").update(fields).eq("id", id);
+      if (error) throw new Error(error.message);
+    }
+    Object.assign(leadRows.find((l) => l.id === id) ?? {}, fields);
+    $("leads-msg").textContent = "Saved.";
+    setTimeout(() => ($("leads-msg").textContent = ""), 1500);
+  } catch (e) { $("leads-msg").textContent = `Not saved: ${e.message}`; $("leads-msg").className = "err"; }
+}
+
+/** A player code for someone new: their initials and the next free number (Josh King -> JK01). */
+function suggestCode(name, people) {
+  const words = name.toUpperCase().replace(/[^A-Z ]/g, "").split(/\s+/).filter(Boolean);
+  const letters = ((words[0]?.[0] ?? "X") + (words.length > 1 ? words[words.length - 1][0] : words[0]?.[1] ?? "X"));
+  const taken = new Set(people.map((p) => p.player_code));
+  for (let i = 1; i < 100; i++) { const c = letters + String(i).padStart(2, "0"); if (!taken.has(c)) return c; }
+  return "";
+}
+
+async function inviteLead(l) {
+  invitingLead = l.id;
+  await loadPeople();
+  const { people } = await peopleCall("GET");
+  const coach = /coach/i.test(l.interest) && !/both/i.test(l.interest);
+  $("inv-code").value = coach ? "" : suggestCode(l.name, people);
+  $("inv-name").value = l.name; $("inv-email").value = l.email; $("inv-role").value = coach ? "coach" : "player";
+  peopleMsg(`Inviting lead ${l.name}: check the player code, then send. They'll be marked invited on the Leads page.`);
+}
+
+$("leads-link").onclick = () => loadLeads();
+$("leads-back").onclick = () => { show("who", "home"); loadPlayer(); };
+["lead-search", "lead-status", "lead-beta"].forEach((id) => ($(id).oninput = drawLeads));
+$("people-link").addEventListener("click", () => (invitingLead = null));
 
 $("signin-form").onsubmit = async (e) => {
   e.preventDefault();
