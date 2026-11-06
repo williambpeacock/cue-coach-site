@@ -50,6 +50,16 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .chart { background: var(--panel-2); border-radius: 10px; padding: 10px; height: 200px; }
 .msg { color: var(--muted); } .err { color: var(--bad); }
+/* Admin People page (2026-11-05). */
+.invite { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; max-width: none; }
+.invite label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.invite .buttons { display: flex; gap: 10px; flex-wrap: wrap; grid-column: 1 / -1; }
+.linkbox { display: flex; gap: 8px; margin-top: 10px; } .linkbox input { flex: 1; min-width: 0; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); }
+.tag.active { border-color: #4d7c4d; color: #a6e3a1; } .tag.invited { border-color: var(--accent); color: var(--accent); }
+.small { font-size: 12px; color: var(--muted); }
+#people-table td, #people-table th { text-align: left; vertical-align: top; }
+#people-table select { padding: 4px 8px; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -59,7 +69,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <span id="me"></span><button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
+      <span id="me"></span><button class="link" id="people-link" hidden>People</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -102,6 +112,27 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
     <div class="table-wrap"><table id="strokes"></table></div>
   </section>
 
+  <section class="panel" id="people" hidden>
+    <div><button class="link" id="people-back">← Strokes</button></div>
+    <h2>Invite someone</h2>
+    <p class="small">For a player who already has shots, use their player code: their shots stay theirs. Logins are by invitation only.
+      The email has a link to choose a password here; then they sign in on the phone with that email.</p>
+    <form id="invite-form" class="invite">
+      <label>Player code <input id="inv-code" placeholder="JK01" maxlength="4" autocomplete="off"></label>
+      <label>Name <input id="inv-name" placeholder="Josh K" maxlength="100" autocomplete="off"></label>
+      <label>Email <input id="inv-email" type="email" placeholder="josh@example.com" autocomplete="off" required></label>
+      <label>Role <select id="inv-role"><option value="">(keep / player)</option><option value="player">Player</option><option value="coach">Coach</option><option value="admin">Admin</option></select></label>
+      <div class="buttons">
+        <button class="primary" type="submit">Send invitation</button>
+        <button type="button" id="inv-link">Make a link to send myself</button>
+      </div>
+    </form>
+    <div id="people-msg" class="msg"></div>
+    <div class="linkbox" id="linkbox" hidden><input id="link-out" readonly aria-label="Password link"><button type="button" id="link-copy">Copy</button></div>
+    <h2 style="margin-top:22px">Everyone</h2>
+    <div class="table-wrap"><table id="people-table"></table></div>
+  </section>
+
   <div id="status" class="msg"></div>
 </div>
 
@@ -121,7 +152,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const speed = (v) => (v == null || v <= 0 ? "–" : `${fmt(v, 2)} m/s · ${fmt(v * MPH, 1)} mph`);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -158,6 +189,7 @@ async function signedIn() {
   show("who", "home");
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
+  $("people-link").hidden = me.role !== "admin";
   // Coaches and admin pick a player; a player sees only themself.
   let players = [me];
   if (me.role !== "player") {
@@ -187,7 +219,7 @@ async function loadPlayer() {
     drawLatest(sessions[0]);
     drawWeeks(weeks);
     drawSessions(sessions);
-    show("who", "home");
+    if ($("people").hidden) show("who", "home");  // the People page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
@@ -243,6 +275,87 @@ async function loadDay(date) {
   } catch (e) { status(e.message, true); }
 }
 
+// ---- Admin: People (2026-11-05). The people edge function does the work with the service key;
+// this page only sends the admin's own login (cloud/production/supabase/functions/people).
+async function peopleCall(method, body) {
+  if (mock) {
+    if (method === "GET") return { ok: true, people: await fromMock("people") };
+    return { ok: true, note: "mock: nothing sent", link: body.link ? "https://example.com/mock-link" : null };
+  }
+  const { data: { session } } = await db.auth.getSession();
+  const res = await fetch(`${CUE_CONFIG.SUPABASE_URL}/functions/v1/people`, {
+    method,
+    headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, apikey: CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const answer = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  if (!answer.ok) throw new Error(answer.error || `HTTP ${res.status}`);
+  return answer;
+}
+
+const when = (t) => (t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : "");
+function statusTag(p) {
+  if (p.status === "active") return `<span class="tag active">Signed in</span> <span class="small">${when(p.last_sign_in_at)}</span>`;
+  if (p.status === "invited") return `<span class="tag invited">Invited</span> <span class="small">${when(p.invited_at)}</span>`;
+  if (p.status === "not invited") return `<span class="tag">Email set, no link sent</span>`;
+  return `<span class="tag">No login yet</span>`;
+}
+
+async function loadPeople(note) {
+  show("who", "people");
+  $("title").textContent = "People";
+  status("Loading…");
+  try {
+    const { people } = await peopleCall("GET");
+    const roles = ["player", "coach", "admin"];
+    $("people-table").innerHTML = "<tr><th>Code</th><th>Name</th><th>Email</th><th>Role</th><th>Login</th><th>Shots</th><th></th></tr>" +
+      people.map((p) => `<tr data-id="${esc(p.id)}">
+        <td>${esc(p.player_code ?? "")}</td><td>${esc(p.name)}</td><td>${esc(p.email ?? "")}</td>
+        <td><select class="role" ${p.id === me.id ? "disabled title=\"You can't change your own role\"" : ""}>${roles.map((r) => `<option ${r === p.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+        <td>${statusTag(p)}</td>
+        <td>${p.recordings}${p.last_recording_at ? ` <span class="small">last ${when(p.last_recording_at)}</span>` : ""}</td>
+        <td>${p.email
+          ? `<button class="link resend">Send link</button> · <button class="link copylink">Copy link</button>`
+          : `<button class="link fill">Invite…</button>`}</td></tr>`).join("");
+    $("people-table").querySelectorAll("tr[data-id]").forEach((tr) => {
+      const p = people.find((x) => x.id === tr.dataset.id);
+      tr.querySelector(".role").onchange = (e) => act({ action: "role", id: p.id, role: e.target.value });
+      tr.querySelector(".resend")?.addEventListener("click", () => act({ action: "resend", id: p.id }));
+      tr.querySelector(".copylink")?.addEventListener("click", () => act({ action: "resend", id: p.id, link: true }));
+      tr.querySelector(".fill")?.addEventListener("click", () => {
+        $("inv-code").value = p.player_code ?? ""; $("inv-name").value = p.name; $("inv-email").value = ""; $("inv-email").focus();
+      });
+    });
+    status("");
+    if (note) peopleMsg(note);
+  } catch (e) { status(e.message, true); }
+}
+
+function peopleMsg(text, bad, link) {
+  $("people-msg").textContent = text || "";
+  $("people-msg").className = bad ? "err" : "msg";
+  $("linkbox").hidden = !link;
+  if (link) $("link-out").value = link;
+}
+
+async function act(body) {
+  peopleMsg("Working…");
+  try {
+    const r = await peopleCall("POST", body);
+    await loadPeople();
+    peopleMsg(r.link ? `${r.note}. This link works once and expires in about an hour: send it only to them.` : r.note, false, r.link);
+  } catch (e) { peopleMsg(e.message, true); if (body.action === "role") loadPeople(); }
+}
+
+function inviteBody(link) {
+  return { action: "invite", code: $("inv-code").value, name: $("inv-name").value, email: $("inv-email").value, role: $("inv-role").value || undefined, link };
+}
+$("invite-form").onsubmit = (e) => { e.preventDefault(); act(inviteBody(false)); };
+$("inv-link").onclick = () => { if ($("invite-form").reportValidity()) act(inviteBody(true)); };
+$("link-copy").onclick = async () => { await navigator.clipboard.writeText($("link-out").value); $("link-copy").textContent = "Copied"; setTimeout(() => ($("link-copy").textContent = "Copy"), 1500); };
+$("people-link").onclick = () => loadPeople();
+$("people-back").onclick = () => { show("who", "home"); loadPlayer(); };
+
 $("signin-form").onsubmit = async (e) => {
   e.preventDefault();
   $("signin-msg").textContent = "Signing in…";
@@ -265,7 +378,7 @@ $("reset-form").onsubmit = async (e) => {
 };
 $("setpw").onclick = () => show("reset");
 $("signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
-$("player").onchange = () => { playerCode = $("player").value; loadPlayer(); };
+$("player").onchange = () => { playerCode = $("player").value; show("who", "home"); loadPlayer(); };
 $("back").onclick = () => { show("who", "home"); status(""); };
 start();
 </script>
