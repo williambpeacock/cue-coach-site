@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cue Path Viewer</title>
+<!--
+  Built by cue_path.py: --viewer fills in the shot paths at the end (the Mac page);
+  --web makes web/viewer.html, which fetches one stroke's path from the "shot-path"
+  edge function instead (web/viewer_loader.js).
+  Looks come from viewer_settings.js (loaded next): edit that file and reload.
+  This page only draws. Every number comes from the shot paths (see cue_path.py).
+-->
+<script src="viewer_settings.js"></script>
+<style>
+:root {
+  --bg: #1c1e22; --panel: #24272c; --line: #41454d; --fg: #f0f0f0; --muted: #9a9da2; --accent: #e8792e; --cloth: #1f3a33;
+  --font: Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 14px; }
+.wrap { max-width: 1000px; margin: 0 auto; padding-block: 28px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 16px; }
+.label { font-size: 11px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(24px, 4vw, 34px); margin: 4px 0 0; text-wrap: balance; }
+h1 em { color: var(--accent); font-style: normal; }
+.views { display: grid; gap: 10px; }
+.stage { background: var(--cloth); border-radius: 10px; overflow: hidden; position: relative; }
+.stage .tag { position: absolute; left: 12px; top: 10px; }
+canvas { display: block; width: 100%; }
+#top { aspect-ratio: 16 / 8; }
+#side { aspect-ratio: 16 / 5; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { background: transparent; color: var(--fg); border: 0; padding: 8px 14px; font: 600 14px var(--font); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#play { background: var(--fg); color: var(--bg); border: 0; border-radius: 6px; padding: 8px 18px; font: 700 14px var(--font); cursor: pointer; min-width: 84px; }
+.ctl { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.ctl output { color: var(--fg); font-variant-numeric: tabular-nums; min-width: 3.5ch; }
+input[type=range] { accent-color: var(--accent); }
+#scrub { width: 100%; }
+.read { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--line); border-radius: 8px; overflow: hidden; }
+.read div { background: var(--panel); padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
+.read b { font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 760px) { .read { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 460px) { .read { grid-template-columns: repeat(2, minmax(0, 1fr)); } #top { aspect-ratio: 4 / 3; } }
+.chartbox { background: var(--panel); border-radius: 10px; padding: 14px 14px 8px; display: grid; gap: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+#chart { aspect-ratio: 16 / 5; }
+.notes { color: var(--muted); font-size: 13px; line-height: 1.55; max-width: 76ch; margin: 0; padding-left: 18px; }
+.notes li + li { margin-top: 4px; }
+.file { color: var(--muted); font-size: 12px; }
+#loadmsg { color: var(--muted); }
+#loadmsg.err { color: #e5534b; }
+.back { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="label" id="subtitle"></div>
+    <h1 id="title"></h1>
+  </header>
+  <div id="loadmsg" hidden></div>
+
+  <div class="views">
+    <div class="stage" id="topBox"><span class="label tag">Top view</span><canvas id="top"></canvas></div>
+    <div class="stage" id="sideBox"><span class="label tag">Side view</span><canvas id="side"></canvas></div>
+  </div>
+
+  <div class="bar">
+    <div class="seg" id="shots" role="group" aria-label="Shot"></div>
+    <button id="play" type="button">Play</button>
+    <label class="ctl" for="exagSide">Enlarge sideways <input id="exagSide" type="range" min="1" step="1"><output id="exagSideOut"></output></label>
+    <label class="ctl" for="exagUp">Enlarge up/down <input id="exagUp" type="range" min="1" step="1"><output id="exagUpOut"></output></label>
+    <label class="ctl" for="speed">Speed <input id="speed" type="range" min="0" step="1"><output id="speedOut"></output></label>
+  </div>
+  <input id="scrub" type="range" min="0" max="1000" value="1000" aria-label="Time in the stroke">
+
+  <div class="read">
+    <div><span class="label">From contact</span><b id="rT">–</b></div>
+    <div><span class="label">Part of stroke</span><b id="rP">–</b></div>
+    <div><span class="label">Turned</span><b id="rH">–</b></div>
+    <div><span class="label">Tip off line</span><b id="rO">–</b></div>
+    <div><span class="label">Tip up/down</span><b id="rU">–</b></div>
+    <div><span class="label">Twist</span><b id="rW">–</b></div>
+  </div>
+
+  <div class="chartbox" id="chartBox">
+    <div class="label" id="chartTitle"></div>
+    <div class="legend"><span><i id="legSide"></i>Tip off line (one side +, other side −)</span><span><i id="legUp"></i>Tip up (+) or down (−) since contact</span></div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <ul class="notes" id="notes">
+    <li>Angles come from the gyro and are measured against where the cue pointed at contact. "Tip" numbers are those angles at the grip-to-tip distance set in the settings.</li>
+    <li>The grip is drawn sliding straight along the line. Only the cue's turning is measured, not the whole cue sliding sideways or up and down.</li>
+    <li>For 30 ms after contact the hit shakes the sensor, so the direction is held still there (the grey band on the chart).</li>
+    <li>Which way is left and which is right is not confirmed yet, so the sides are not named.</li>
+  </ul>
+  <div class="file" id="file"></div>
+</div>
+
+<script>
+// Draws the shots it's given (shot paths with a "label"), once they're at hand.
+function startViewer(SHOTS) {
+const DEFAULTS = {
+  text: { title: "Where the cue tip went", highlight: "tip", subtitle: "Cue Coach" },
+  page: { background: "#1c1e22", panel: "#24272c", line: "#41454d", text: "#f0f0f0", muted: "#9a9da2", accent: "#e8792e", font: "Arial, sans-serif" },
+  table: { cloth: "#1f3a33", show_shot_line: true, shot_line_color: "rgba(240,240,240,0.25)", show_table_surface: true, surface_color: "rgba(240,240,240,0.18)" },
+  cue: { length_in: 58, grip_to_tip_in: 46, thickness_in: 0.85, butt_share: 0.45, butt_color: "#3a2416", joint_color: "#d9c49a", shaft_color: "#e9dcc0", ferrule_color: "#f5f5f0", tip_color: "#4d8fd6" },
+  ball: { show: true, color: "#f4f1e8", diameter_in: 2.25, hide_after_contact: true },
+  grip: { show: true, color: "rgba(240,240,240,0.8)" },
+  trace: { sideways_color: "#e8792e", height_color: "#6fb3e0", width_px: 2.5, show_full_path_faintly: true },
+  views: { top: true, side: true, chart: true, notes: true },
+  enlarge: { sideways: 10, sideways_max: 20, up_down: 3, up_down_max: 10 },
+  playback: { speeds: [0.1, 0.25, 0.5, 1], start_speed: 0.25, autoplay: false, loop: false },
+  units: "in",
+};
+// Settings file values over the defaults, section by section (a missing value keeps its default).
+const USER = window.VIEWER_SETTINGS || {};
+const S = {};
+for (const k in DEFAULTS) S[k] = (typeof DEFAULTS[k] === "object" && !Array.isArray(DEFAULTS[k])) ? { ...DEFAULTS[k], ...(USER[k] || {}) } : (USER[k] ?? DEFAULTS[k]);
+
+const $ = id => document.getElementById(id);
+const root = document.documentElement.style;
+[["--bg", S.page.background], ["--panel", S.page.panel], ["--line", S.page.line], ["--fg", S.page.text],
+ ["--muted", S.page.muted], ["--accent", S.page.accent], ["--font", S.page.font], ["--cloth", S.table.cloth]]
+  .forEach(([k, v]) => root.setProperty(k, v));
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+$("subtitle").textContent = S.text.subtitle;
+$("title").innerHTML = S.text.highlight ? esc(S.text.title).replace(esc(S.text.highlight), "<em>" + esc(S.text.highlight) + "</em>") : esc(S.text.title);
+$("topBox").hidden = !S.views.top; $("sideBox").hidden = !S.views.side;
+$("chartBox").hidden = !S.views.chart; $("notes").hidden = !S.views.notes;
+$("legSide").style.background = S.trace.sideways_color; $("legUp").style.background = S.trace.height_color;
+
+const CM = S.units === "cm", UNIT = CM ? "cm" : "in", toUnit = x => CM ? x * 2.54 : x;
+$("chartTitle").textContent = `Tip movement (${UNIT}, real size) against time from contact`;
+const TIP = S.cue.grip_to_tip_in, BUTT = S.cue.length_in - S.cue.grip_to_tip_in, BALL_R = S.ball.diameter_in / 2;
+const RAD = Math.PI / 180;
+const speeds = S.playback.speeds;
+$("exagSide").max = S.enlarge.sideways_max; $("exagSide").value = S.enlarge.sideways;
+$("exagUp").max = S.enlarge.up_down_max; $("exagUp").value = S.enlarge.up_down;
+$("speed").max = speeds.length - 1;
+$("speed").value = Math.max(0, speeds.indexOf(S.playback.start_speed));
+const speedName = v => (v === 0.1 ? "⅒" : v === 0.25 ? "¼" : v === 0.5 ? "½" : String(v)) + "×";
+const syncOutputs = () => {
+  $("exagSideOut").textContent = $("exagSide").value + "×";
+  $("exagUpOut").textContent = $("exagUp").value + "×";
+  $("speedOut").textContent = speedName(speeds[+$("speed").value]);
+};
+
+let shot = 0, idx = 0, playing = false, last = 0, simT = 0;
+const cur = () => SHOTS[shot];
+const F = () => cur().frames;            // [t, grip_in, heading, elevation, twist]
+const elev0 = () => F()[F().findIndex(f => f[0] >= 0)][3];
+const sideIn = f => TIP * Math.sin(f[2] * RAD);
+const upIn = f => TIP * Math.sin((f[3] - elev0()) * RAD);
+
+SHOTS.forEach((d, i) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = d.label;
+  b.onclick = () => { shot = i; reset(); };
+  $("shots").appendChild(b);
+});
+
+function phase(t) {
+  const p = cur().phases;
+  if (t < p.backswing_start) return "Address";
+  if (t < p.backswing_end) return "Backswing";
+  if (p.forward_start != null && t < p.forward_start) return "Pause";
+  if (t < 0) return "Forward";
+  if (p.follow_through_end == null || t < p.follow_through_end) return "Follow-through";
+  return "Finish";
+}
+
+function fit(c) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [ctx, r.width, r.height];
+}
+
+// x range shared by both views: from the butt at the furthest-back grip to past the ball
+function xRange() {
+  const g = F().map(f => f[1]);
+  return [Math.min(...g) - BUTT - 2, Math.max(Math.max(...g) + TIP, TIP + 2 * BALL_R) + 3];
+}
+
+function drawCue(ctx, x1, y1, x2, y2, w) {
+  // butt -> joint -> shaft -> ferrule -> tip, in screen space
+  const L = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+  const at = s => [x1 + ux * L * s, y1 + uy * L * s];
+  const part = (s0, s1, color, width) => { const a = at(s0), b = at(s1); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); };
+  ctx.lineCap = "butt";
+  const bs = S.cue.butt_share, ferrule = Math.min(0.02, 1 / L * 6);
+  part(0, bs, S.cue.butt_color, w * 1.15);
+  part(bs, bs + 0.012, S.cue.joint_color, w * 1.1);
+  part(bs + 0.012, 1 - ferrule, S.cue.shaft_color, w);
+  part(1 - ferrule, 1, S.cue.ferrule_color, w * 0.95);
+  ctx.fillStyle = S.cue.tip_color; ctx.beginPath(); ctx.arc(x2, y2, Math.max(2.5, w * 0.55), 0, 7); ctx.fill();
+}
+
+function drawPath(ctx, pts, color, alpha) {
+  ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = S.trace.width_px; ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+function drawView(canvas, kind) {
+  const [ctx, w, h] = fit(canvas);
+  const [x0, x1] = xRange(), sc = w / (x1 - x0), X = x => (x - x0) * sc;
+  const k = kind === "top" ? +$("exagSide").value : +$("exagUp").value;
+  const yMid = kind === "top" ? h / 2 : h * 0.42, Y = y => yMid - y * sc;
+  ctx.clearRect(0, 0, w, h);
+  const frames = F(), f = frames[idx], e0 = elev0();
+  // the cue's ends for a frame, in inches (top: lateral enlarged; side: drawn at its real angle, change enlarged)
+  const ends = fr => {
+    if (kind === "top") {
+      const s = Math.sin(fr[2] * RAD);
+      return [[fr[1] - BUTT, -k * BUTT * s], [fr[1] + TIP, k * TIP * s]];
+    }
+    const e = (e0 + k * (fr[3] - e0)) * RAD, c = Math.cos(e), s = Math.sin(e);
+    return [[fr[1] - BUTT * c, -BUTT * s], [fr[1] + TIP * c, TIP * s]];
+  };
+  const tipAtContact = ends(frames[frames.findIndex(fr => fr[0] >= 0)])[1];
+  ctx.font = "11px " + S.page.font;
+  if (S.table.show_shot_line) {
+    ctx.strokeStyle = S.table.shot_line_color; ctx.setLineDash([6, 6]); ctx.lineWidth = 1;
+    const yl = kind === "top" ? Y(0) : Y(tipAtContact[1]);
+    ctx.beginPath(); ctx.moveTo(0, yl); ctx.lineTo(w, yl); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = S.table.shot_line_color; ctx.fillText(kind === "top" ? "line of the shot" : "tip height at contact", 8, yl - 6);
+  }
+  if (kind === "side" && S.table.show_table_surface) {
+    const ys = Y(tipAtContact[1] - BALL_R);
+    ctx.fillStyle = S.table.surface_color; ctx.fillRect(0, ys, w, 2);
+  }
+  if (S.ball.show && !(S.ball.hide_after_contact && f[0] >= 0.02)) {
+    ctx.fillStyle = S.ball.color; ctx.beginPath(); ctx.arc(X(tipAtContact[0] + BALL_R), Y(tipAtContact[1]), BALL_R * sc, 0, 7); ctx.fill();
+  }
+  const color = kind === "top" ? S.trace.sideways_color : S.trace.height_color;
+  const tipPts = frames.map(fr => { const t = ends(fr)[1]; return [X(t[0]), Y(t[1])]; });
+  if (S.trace.show_full_path_faintly) drawPath(ctx, tipPts, color, 0.22);
+  drawPath(ctx, tipPts.slice(0, idx + 1), color, 1);
+  const [b, t] = ends(f);
+  drawCue(ctx, X(b[0]), Y(b[1]), X(t[0]), Y(t[1]), Math.max(4, S.cue.thickness_in * sc));
+  if (S.grip.show) {
+    const gy = 0;   // the cue turns about the grip, which is drawn on the line in both views
+    ctx.strokeStyle = S.grip.color; ctx.lineWidth = 1.5; const rr = Math.max(5, 1.4 * sc);
+    ctx.beginPath(); ctx.arc(X(f[1]), Y(gy), rr, 0, 7); ctx.stroke();
+    ctx.fillStyle = S.grip.color; ctx.fillText("grip", X(f[1]) - 10, Y(gy) + rr + 13);
+  }
+  ctx.fillStyle = S.page.muted;
+  const note = (kind === "top" ? "sideways" : "up/down") + " enlarged " + k + "×";
+  ctx.fillText(note, w - ctx.measureText(note).width - 10, h - 10);
+}
+
+function drawChart() {
+  const [ctx, w, h] = fit($("chart"));
+  const frames = F(), ph = cur().phases, t0 = frames[0][0], t1 = frames[frames.length - 1][0];
+  const all = SHOTS.flatMap(d => { const e = d.frames[d.frames.findIndex(f => f[0] >= 0)][3];
+    return d.frames.flatMap(f => [Math.abs(TIP * Math.sin(f[2] * RAD)), Math.abs(TIP * Math.sin((f[3] - e) * RAD))]); });
+  const lim = Math.max(0.5, Math.ceil(toUnit(Math.max(...all)) * 2) / 2);
+  const L = 36, R = 8, T = 8, B = 20;
+  const X = t => L + (t - t0) / (t1 - t0) * (w - L - R), Y = v => T + (lim - v) / (2 * lim) * (h - T - B);
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = "11px " + S.page.font; ctx.lineWidth = 1;
+  for (let i = -2; i <= 2; i++) {
+    const v = lim * i / 2;
+    ctx.strokeStyle = S.page.line; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(w - R, Y(v)); ctx.stroke();
+    ctx.fillStyle = S.page.muted; ctx.fillText((v > 0 ? "+" : "") + (+v.toFixed(2)), 2, Y(v) + 4);
+  }
+  ctx.fillStyle = "rgba(154,157,162,.18)";
+  ctx.fillRect(X(-0.002), T, X(cur().hold_after_contact_s) - X(-0.002), h - T - B);
+  [[0, "contact"], [ph.follow_through_end, "follow-through ends"]].forEach(([t, s]) => {
+    if (t == null) return;
+    ctx.strokeStyle = S.page.muted; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X(t), T); ctx.lineTo(X(t), h - B); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = S.page.muted; ctx.fillText(s, Math.min(X(t) + 4, w - R - ctx.measureText(s).width), h - 6);
+  });
+  [[sideIn, S.trace.sideways_color], [upIn, S.trace.height_color]].forEach(([fn, color]) => {
+    const pts = frames.map(f => [X(f[0]), Y(toUnit(fn(f)))]);
+    drawPath(ctx, pts, color, 0.3);
+    drawPath(ctx, pts.slice(0, idx + 1), color, 1);
+    const p = pts[idx]; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, 7); ctx.fill();
+  });
+}
+
+function readout() {
+  const f = F()[idx], t = f[0];
+  const sgn = v => (v > 0.05 ? "+" : v < -0.05 ? "−" : "") + Math.abs(v).toFixed(1);
+  $("rT").textContent = (t >= 0 ? "+" : "−") + Math.abs(t).toFixed(2) + " s";
+  $("rP").textContent = phase(t);
+  $("rH").textContent = Math.abs(f[2]).toFixed(1) + "°";
+  $("rO").textContent = Math.abs(toUnit(sideIn(f))).toFixed(1) + " " + UNIT;
+  $("rU").textContent = sgn(toUnit(upIn(f))) + " " + UNIT;
+  $("rW").textContent = sgn(f[4]) + "°";
+}
+
+function render() {
+  $("scrub").value = Math.round(idx / (F().length - 1) * 1000);
+  if (S.views.top) drawView($("top"), "top");
+  if (S.views.side) drawView($("side"), "side");
+  if (S.views.chart) drawChart();
+  readout();
+}
+
+function reset() {
+  [...$("shots").children].forEach((b, i) => b.setAttribute("aria-pressed", i === shot));
+  $("file").textContent = "Recording: " + cur().recording + " · impact speed " + cur().impact_speed_mps.toFixed(2) + " m/s";
+  if (playing) start(); else { idx = F().length - 1; render(); }
+}
+function start() { idx = 0; simT = F()[0][0]; last = performance.now(); }
+function setPlaying(on) { playing = on; $("play").textContent = on ? "Pause" : (idx >= F().length - 1 ? "Replay" : "Play"); }
+
+function tick(now) {
+  if (playing) {
+    const frames = F();
+    simT += (now - last) / 1000 * speeds[+$("speed").value]; last = now;
+    while (idx < frames.length - 1 && frames[idx + 1][0] <= simT) idx++;
+    if (idx >= frames.length - 1) { if (S.playback.loop) start(); else setPlaying(false); }
+    render();
+  }
+  requestAnimationFrame(tick);
+}
+
+$("play").onclick = () => {
+  if (playing) return setPlaying(false);
+  if (idx >= F().length - 1) start(); else { simT = F()[idx][0]; last = performance.now(); }
+  setPlaying(true);
+};
+$("scrub").oninput = e => { setPlaying(false); idx = Math.round(e.target.value / 1000 * (F().length - 1)); render(); };
+["exagSide", "exagUp"].forEach(id => $(id).oninput = () => { syncOutputs(); render(); });
+$("speed").oninput = syncOutputs;
+addEventListener("resize", render);
+syncOutputs();
+reset();
+if (S.playback.autoplay && !matchMedia("(prefers-reduced-motion: reduce)").matches) { start(); setPlaying(true); }
+requestAnimationFrame(tick);
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
+<script src="viewer_loader.js"></script>
+</body>
+</html>

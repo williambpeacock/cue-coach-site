@@ -299,8 +299,16 @@ async function loadDay(date) {
     const strokes = (await rows("stroke_facts", { player_code: playerCode, local_date: date })).filter((s) => !s.error);
     strokes.sort((a, b) => (a.recorded_at === b.recorded_at ? a.stroke_no - b.stroke_no : a.recorded_at < b.recorded_at ? -1 : 1));
     $("day-title").textContent = `${date} · ${strokes.length} strokes`;
-    $("strokes").innerHTML = "<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Cue angle °</th><th>Pause s</th></tr>" +
-      strokes.map((s) => `<tr><td>${new Date(s.recorded_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td>${fmt(s.straightness_yaw, 2)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td></tr>`).join("");
+    // The cue path viewer (viewer.html, 2026-11-06): admins and coaches only until left/right is confirmed.
+    const paths = !mock && ["admin", "coach"].includes(me.role);
+    const time = (s) => new Date(s.recorded_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const pathLink = (s) => {
+      const label = `${date} ${time(s)} · ${s.impact_speed_mps > 0 ? fmt(s.impact_speed_mps, 2) + " m/s" : "stroke " + (s.stroke_no + 1)}`;
+      const q = new URLSearchParams({ recording: s.recording_id, stroke: s.stroke_no, label });
+      return `<td><a href="viewer.html?${q}" target="_blank" rel="noopener">Path</a></td>`;
+    };
+    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Cue angle °</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
+      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td>${fmt(s.straightness_yaw, 2)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
     show("who", "day");
     status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
   } catch (e) { status(e.message, true); }
