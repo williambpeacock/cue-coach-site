@@ -27,12 +27,29 @@
   .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
 
   /* "My Cue Coach": players and coaches sign in to their strokes (cue-coach.com/app). */
+  .topnav { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; }
   .account {
-    position: absolute; top: 16px; right: 16px;
     padding: 8px 16px; border: 1px solid var(--orange); border-radius: 999px;
     color: var(--orange); text-decoration: none; font-size: 0.9rem; font-weight: 600;
   }
   .account:hover, .account:focus-visible { background: var(--orange); color: var(--bg); }
+
+  /* Shop: checkout is a Square payment link (Square Dashboard > Payment links). */
+  .product {
+    display: grid; grid-template-columns: 200px 1fr; gap: 32px; align-items: center;
+    background: var(--bg-soft); border-radius: 14px; padding: 32px; margin-top: 40px;
+  }
+  .product img { width: 100%; max-width: 200px; height: auto; margin: 0 auto; display: block; }
+  .product h3 { font-size: 1.4rem; margin-bottom: 4px; }
+  .price { font-size: 1.8rem; font-weight: 700; color: var(--orange); margin-bottom: 12px; }
+  .product p { color: var(--text-dim); margin-bottom: 12px; }
+  .product .badge { margin-bottom: 18px; font-size: 0.75rem; padding: 6px 14px; }
+  a.btn { display: inline-block; text-decoration: none; }
+  .btn:hover, .btn:focus-visible { filter: brightness(1.1); }
+  @media (max-width: 640px) {
+    .product { grid-template-columns: 1fr; padding: 24px; text-align: center; }
+    .product img { max-width: 120px; }
+  }
   footer a { color: var(--text-dim); }
 
   /* Hero */
@@ -178,7 +195,10 @@
 <body>
 
 <header class="hero">
-  <a class="account" href="app/">My Cue Coach</a>
+  <nav class="topnav">
+    <a class="account" href="#shop">Shop</a>
+    <a class="account" href="app/">My Cue Coach</a>
+  </nav>
   <div class="wrap">
     <img class="logo" src="Logo_4.0/CC_logo_4.0.svg" alt="Cue Coach">
     <h1>See every <span>stroke</span>.<br>Fix every flaw.</h1>
@@ -245,6 +265,26 @@
         <li class="hit">Impact</li>
         <li>Follow-through</li>
       </ul>
+    </div>
+  </section>
+
+  <section id="shop">
+    <div class="wrap">
+      <p class="label">Shop</p>
+      <h2>Get Cue Coach.</h2>
+      <p class="lead">Pre-order now and be one of the first to get one.</p>
+      <div class="product">
+        <img src="Logo_4.0/CC_icon_4.0.svg" alt="">
+        <div>
+          <div class="badge">Coming Soon</div>
+          <h3>Cue Coach sensor</h3>
+          <div class="price">$199</div>
+          <p>A smart sensor that fits where your cue's bumper goes and records every stroke. Pair it with the Cue Coach app to see your backswing, follow-through, cue angle and twist after each shot, so you know exactly what to work on.</p>
+          <p>Fits Meucci, Predator, McDermott and Cuetec cues. You choose yours at checkout.</p>
+          <!-- Square payment link: change it in the Square Dashboard, or paste a new one here. -->
+          <a class="btn" href="https://square.link/u/q1c3RzOX" rel="noopener">Pre-order</a>
+        </div>
+      </div>
     </div>
   </section>
 
