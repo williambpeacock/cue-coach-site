@@ -8,7 +8,7 @@
      Supabase. Same login and config.js as index.html (one sign-in on this site covers both).
      There are no realtime events on the stroke_facts view, so it asks every second (POLL_MS) for the
      player's strokes of the day and shows any it hasn't seen.
-     ?player=BP01 picks the player (coaches/admin); ?mock=1 replays a mock day, one stroke every few seconds. -->
+     ?player=BP01 picks the player (coaches/admin); ?m=straight,ft,... the metric tiles (the Metrics button); ?mock=1 replays a mock day, one stroke every few seconds. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -72,6 +72,20 @@ footer { color: var(--muted); font-size: 1.7vh; display: flex; justify-content: 
 .signin form { display: flex; flex-direction: column; gap: 10px; width: min(360px, 90vw); }
 .signin h2 { font-family: var(--display); font-weight: 500; margin: 0 0 6px; }
 .waiting { font-family: var(--display); font-size: 6vh; color: var(--muted); }
+.metrics.four { grid-template-columns: repeat(4, 1fr); } .metrics.four .metric .v { font-size: 4.2vh; }
+/* The metric picker (2026-11-07): ranked by what a coach looks at first. */
+.picker { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 5; }
+.picker .box { background: var(--panel); border-radius: 14px; padding: 22px 24px; width: min(720px, 94vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; }
+.picker h2 { font-family: var(--display); font-weight: 500; margin: 0; font-size: 24px; }
+.picker .hint { color: var(--muted); font-size: 14px; margin: 0; }
+.picker ol { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.picker li label { display: grid; grid-template-columns: 28px 22px 1fr; gap: 8px; align-items: start; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.picker li label:hover { background: var(--panel-2); }
+.picker .rank { color: var(--muted); font-family: var(--display); font-size: 18px; text-align: right; }
+.picker input[type=checkbox] { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); }
+.picker .what { font-weight: 600; } .picker .why { color: var(--muted); font-size: 13px; }
+.picker .row { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.picker .count { color: var(--muted); font-size: 14px; }
 [hidden] { display: none !important; }
 body.idle { cursor: none; } body.idle .controls { opacity: 0; } .controls { transition: opacity 0.4s; }
 </style>
@@ -84,6 +98,7 @@ body.idle { cursor: none; } body.idle .controls { opacity: 0; } .controls { tran
       <span><span class="dot" id="dot"></span><span id="conn">Starting…</span></span>
       <div class="controls">
         <select id="player" hidden aria-label="Player"></select>
+        <button id="pick" title="Choose the metrics (M)">Metrics</button>
         <button id="fs" title="Full screen (F)">Full screen</button>
       </div>
     </div>
@@ -114,6 +129,18 @@ body.idle { cursor: none; } body.idle .controls { opacity: 0; } .controls { tran
   <footer><span id="status"></span><span id="clock"></span></footer>
 </div>
 
+<div class="picker" id="picker" hidden>
+  <div class="box" role="dialog" aria-labelledby="picker-title">
+    <h2 id="picker-title">Metrics under the speed</h2>
+    <p class="hint">Ranked by what a coach usually looks at first. Pick up to 8; they show in this order. Saved on this TV and in the page address, so a bookmark keeps them.</p>
+    <ol id="picker-list"></ol>
+    <div class="row">
+      <span class="count" id="picker-count"></span>
+      <span style="display:flex;gap:10px"><button id="picker-default">Coach's top 6</button><button id="picker-reset">The original six</button><button class="primary" id="picker-done">Done</button></span>
+    </div>
+  </div>
+</div>
+
 <div class="signin" id="signin" hidden>
   <form id="signin-form">
     <h2>Sign in to Cue Coach</h2>
@@ -130,6 +157,40 @@ body.idle { cursor: none; } body.idle .controls { opacity: 0; } .controls { tran
 <script>
 const MPH = 2.237, POLL_MS = 1000, MOCK_EVERY_MS = 4000, RECENT = 12;
 const params = new URLSearchParams(location.search);
+
+// Every per-stroke number the TV can show, ranked by what a coach usually wants first.
+// v(s) gives the value (null when not measured); d = decimals.
+const tempo = (s) => (s.backswing_seconds > 0 && s.forward_seconds > 0 ? s.backswing_seconds / s.forward_seconds : null);
+const METRICS = [
+  { id: "straight", label: "Straightness", unit: "°", d: 2, v: (s) => s.straightness_yaw, why: "Side-to-side wobble of the cue through the stroke. The first thing coaches fix; lower is straighter." },
+  { id: "ft", label: "Follow-through", unit: "in", d: 1, v: (s) => s.follow_through_in, why: "How far the cue keeps going through the ball. A short one usually means quitting on the shot." },
+  { id: "accel", label: "Speed lost before impact", unit: "%", d: 0, v: (s) => (s.speed_lost_fraction == null ? null : s.speed_lost_fraction * 100), why: "Slowing down into the ball instead of accelerating through it. Lower is better; 0 means still accelerating." },
+  { id: "pause", label: "Pause", unit: "s", d: 2, v: (s) => s.pause_seconds, why: "The stop at the back before the forward stroke. Rushing the transition is a classic fault." },
+  { id: "tempo", label: "Tempo", unit: ": 1", d: 1, v: tempo, why: "Backswing time over forward time. A smooth, slower backswing than delivery is the usual goal." },
+  { id: "twist", label: "Wrist twist", unit: "°", d: 1, v: (s) => s.pre_impact_twist, why: "Cue rolling (screw) from address to impact. It puts unwanted side on the ball." },
+  { id: "back", label: "Backstroke", unit: "in", d: 1, v: (s) => s.backstroke_in, why: "Length of the backswing. Coaches look for the same length for the same shot." },
+  { id: "angle", label: "Cue angle", unit: "°", d: 1, v: (s) => s.cue_angle_impact, why: "Cue elevation at impact. Higher than needed makes the cue ball swerve and jump." },
+  { id: "pitch", label: "Up-and-down straightness", unit: "°", d: 2, v: (s) => s.straightness_pitch, why: "Tip rising or dipping through the stroke, often from the elbow dropping." },
+  { id: "peak", label: "Peak speed", unit: "m/s", d: 2, v: (s) => s.peak_speed_mps, why: "The fastest the cue moved. Well above impact speed means it peaked too early." },
+  { id: "address", label: "Cue angle at address", unit: "°", d: 1, v: (s) => s.cue_angle_address, why: "Cue elevation in the set-up. Compare with the angle at impact." },
+  { id: "fwd", label: "Forward stroke", unit: "in", d: 1, v: (s) => s.forward_stroke_in, why: "Distance from the back of the stroke to the ball." },
+  { id: "backtime", label: "Backswing time", unit: "s", d: 2, v: (s) => s.backswing_seconds, why: "How long the backswing takes." },
+  { id: "fwdtime", label: "Forward time", unit: "s", d: 2, v: (s) => s.forward_seconds, why: "How long the delivery takes." },
+  { id: "fttime", label: "Follow-through time", unit: "ms", d: 0, v: (s) => s.follow_through_ms, why: "How long the cue keeps moving after the ball." },
+  { id: "g", label: "Peak g", unit: "g", d: 1, v: (s) => s.peak_g, why: "How hard the tip hit. Fun at a booth; little coaching value (the sensor tops out at 32 g)." },
+];
+const MAX_PICKS = 8;
+const ORIGINAL = ["back", "ft", "straight", "angle", "g", "pause"];
+const COACH_TOP = METRICS.slice(0, 6).map((m) => m.id);
+const STORE = "cueTvMetrics";
+function loadPicks() {
+  const known = (list) => list.filter((id) => METRICS.some((m) => m.id === id)).slice(0, MAX_PICKS);
+  const fromUrl = known((params.get("m") || "").split(",").filter(Boolean));
+  if (fromUrl.length) return fromUrl;
+  try { const saved = known(JSON.parse(localStorage.getItem(STORE) || "[]")); if (saved.length) return saved; } catch {}
+  return ORIGINAL;
+}
+let picks = loadPicks();
 const mock = params.has("mock");
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 1) => (v == null || v === "" || Number.isNaN(v) ? "–" : Number(v).toFixed(d));
@@ -150,7 +211,7 @@ function today() { const d = new Date(); return new Date(d - d.getTimezoneOffset
 async function fetchToday() {
   if (mock) return mockFeed();
   const { data, error } = await db.from("stroke_facts")
-    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_g, backstroke_in, follow_through_in, straightness_yaw, cue_angle_impact, pause_seconds, low_confidence, error, cue")
+    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, peak_g, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_pitch, straightness_yaw, pre_impact_twist, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
     .eq("player_code", playerCode).eq("local_date", today());
   if (error) throw new Error(error.message);
   return data;
@@ -200,7 +261,7 @@ async function poll() {
 // ---- Drawing
 function drawEmpty() {
   $("waiting").hidden = false; $("shot").hidden = true;
-  $("metrics").innerHTML = ""; $("recent").innerHTML = "";
+  drawMetrics(null); $("recent").innerHTML = "";
   drawStats([]); drawChart([]);
 }
 
@@ -213,21 +274,54 @@ function draw(isNew) {
   $("speed").innerHTML = `${good(last) ? fmt(last.impact_speed_mps, 2) : "–"}<small>m/s${last.low_confidence ? " *" : ""}</small>`;
   $("mph").textContent = good(last) ? fmt(last.impact_speed_mps * MPH) : "–";
   $("best-badge").hidden = !(good(last) && speeds.length > 1 && last.impact_speed_mps >= best);
-  const m = (label, v, unit = "") => `<div class="metric"><div class="label">${label}</div><div class="v">${v}${unit && v !== "–" ? `<small>${unit}</small>` : ""}</div></div>`;
-  $("metrics").innerHTML = [
-    m("Backstroke", fmt(last.backstroke_in), "in"),
-    m("Follow-through", fmt(last.follow_through_in), "in"),
-    m("Straightness", fmt(last.straightness_yaw, 2)),
-    m("Cue angle", fmt(last.cue_angle_impact), "°"),
-    m("Peak g", fmt(last.peak_g)),
-    m("Pause", fmt(last.pause_seconds, 2), "s"),
-  ].join("");
+  drawMetrics(last);
   drawStats(speeds);
   drawChart(strokes);
   $("recent").innerHTML = strokes.slice(-RECENT).reverse().map((s, i) =>
     `<div class="chip ${i === 0 ? "first" : ""}"><div class="v">${good(s) ? fmt(s.impact_speed_mps, 2) : "–"}</div><div class="t">${timeOf(s)}</div></div>`).join("");
   if (isNew) { const h = $("hero"); h.classList.add("flash"); requestAnimationFrame(() => requestAnimationFrame(() => h.classList.remove("flash"))); }
 }
+
+let shown = null;  // the stroke the tiles show, to redraw them when the picks change
+function drawMetrics(s) {
+  shown = s;
+  const el = $("metrics");
+  el.classList.toggle("four", picks.length > 6);
+  if (!s) return (el.innerHTML = "");
+  el.innerHTML = picks.map((id) => METRICS.find((m) => m.id === id)).map((m) => {
+    const v = fmt(m.v(s), m.d);
+    return `<div class="metric"><div class="label">${m.label}</div><div class="v">${v}${v !== "–" ? `<small>${m.unit}</small>` : ""}</div></div>`;
+  }).join("");
+}
+
+// ---- The metric picker
+function drawPicker() {
+  $("picker-list").innerHTML = METRICS.map((m, i) => `<li><label><span class="rank">${i + 1}</span>
+    <input type="checkbox" value="${m.id}" ${picks.includes(m.id) ? "checked" : ""}>
+    <span><span class="what">${m.label}</span> <span class="why">(${m.unit.startsWith(":") ? "ratio" : m.unit})</span><br><span class="why">${m.why}</span></span></label></li>`).join("");
+  const boxes = [...$("picker-list").querySelectorAll("input")];
+  const sync = () => {
+    picks = METRICS.map((m) => m.id).filter((id) => boxes.find((b) => b.value === id).checked);
+    boxes.forEach((b) => (b.disabled = !b.checked && picks.length >= MAX_PICKS));
+    $("picker-count").textContent = `${picks.length} of ${MAX_PICKS} picked`;
+    savePicks();
+  };
+  boxes.forEach((b) => (b.onchange = sync));
+  sync();
+}
+function savePicks() {
+  try { localStorage.setItem(STORE, JSON.stringify(picks)); } catch {}
+  const p = new URLSearchParams(location.search); p.set("m", picks.join(","));
+  history.replaceState(null, "", `?${p}`);
+  drawMetrics(shown);
+}
+const openPicker = () => { drawPicker(); $("picker").hidden = false; };
+const closePicker = () => ($("picker").hidden = true);
+$("pick").onclick = openPicker;
+$("picker-done").onclick = closePicker;
+$("picker").onclick = (e) => { if (e.target === $("picker")) closePicker(); };
+$("picker-default").onclick = () => { picks = COACH_TOP; drawPicker(); };
+$("picker-reset").onclick = () => { picks = ORIGINAL; drawPicker(); };
 
 function drawStats(speeds) {
   const n = speeds.length, avg = n ? speeds.reduce((a, b) => a + b, 0) / n : null;
@@ -326,7 +420,12 @@ $("signin-form").onsubmit = async (e) => {
 // Full screen, keep the screen awake, hide the mouse and controls when nobody's touching it.
 const fullscreen = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.());
 $("fs").onclick = fullscreen;
-document.addEventListener("keydown", (e) => { if (e.key === "f" && e.target.tagName !== "INPUT") fullscreen(); });
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "checkbox") return;
+  if (e.key === "f") fullscreen();
+  else if (e.key === "m") ($("picker").hidden ? openPicker() : closePicker());
+  else if (e.key === "Escape") closePicker();
+});
 let wake = null;
 async function keepAwake() { try { wake = await navigator.wakeLock?.request("screen"); } catch {} }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { keepAwake(); poll(); } });
