@@ -6,7 +6,7 @@
 <title>Cue Coach TV</title>
 <!-- Live TV view (2026-11-07): a screen beside the table that shows each stroke as it reaches
      Supabase. Same login and config.js as index.html (one sign-in on this site covers both).
-     There are no realtime events on the stroke_facts view, so it asks every POLL_MS for the
+     There are no realtime events on the stroke_facts view, so it asks every second (POLL_MS) for the
      player's strokes of the day and shows any it hasn't seen.
      ?player=BP01 picks the player (coaches/admin); ?mock=1 replays a mock day, one stroke every few seconds. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -128,7 +128,7 @@ body.idle { cursor: none; } body.idle .controls { opacity: 0; } .controls { tran
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
 <script>
-const MPH = 2.237, POLL_MS = 4000, MOCK_EVERY_MS = 4000, RECENT = 12;
+const MPH = 2.237, POLL_MS = 1000, MOCK_EVERY_MS = 4000, RECENT = 12;
 const params = new URLSearchParams(location.search);
 const mock = params.has("mock");
 const $ = (id) => document.getElementById(id);
@@ -173,9 +173,14 @@ async function mockFeed() {
 
 const order = (a, b) => (a.recorded_at === b.recorded_at ? a.stroke_no - b.stroke_no : a.recorded_at < b.recorded_at ? -1 : 1);
 
+let polling = false;
 async function poll() {
+  if (polling) return;  // a slow answer: don't stack questions
+  polling = true;
   try {
+    const asked = playerCode;
     const rows = (await fetchToday()).filter((s) => !s.error).sort(order);
+    if (asked !== playerCode) return;  // the player was changed while this was on its way
     lastOk = Date.now();
     setConn("live", "Live");
     status(mock ? "Mock data: a past day replayed, one stroke every 4 s" : "");
@@ -188,7 +193,7 @@ async function poll() {
   } catch (e) {
     setConn("down", "Can't reach Cue Coach");
     status(`${e.message} · trying again`, true);
-  }
+  } finally { polling = false; }
   tickAgo();
 }
 
@@ -257,7 +262,7 @@ function tickAgo() {
     $("ago").textContent = `${timeOf(last)} · ${secs < 60 ? `${secs} s ago` : secs < 3600 ? `${Math.round(secs / 60)} min ago` : "earlier today"}${last.cue ? ` · ${last.cue}` : ""}`;
   }
   $("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (lastOk && Date.now() - lastOk > 3 * POLL_MS) setConn("down", "Reconnecting…");
+  if (lastOk && Date.now() - lastOk > 10000) setConn("down", "Reconnecting…");
 }
 
 // ---- Start
