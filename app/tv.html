@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Coach TV</title>
+<!-- Live TV view (2026-11-07): a screen beside the table that shows each stroke as it reaches
+     Supabase. Same login and config.js as index.html (one sign-in on this site covers both).
+     There are no realtime events on the stroke_facts view, so it asks every POLL_MS for the
+     player's strokes of the day and shows any it hasn't seen.
+     ?player=BP01 picks the player (coaches/admin); ?mock=1 replays a mock day, one stroke every few seconds. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1c1e22; --panel: #2a2a2e; --panel-2: #34343a; --line: #52525b;
+  --fg: #f4f4f5; --muted: #b4b4bb; --accent: #e8792e; --accent-ink: #1c1e22; --bad: #fca5a5; --good: #a6e3a1;
+  --display: "Oswald", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 var(--body); overflow: hidden; }
+/* Sized from the screen, so a 1080p or 4K TV both fill edge to edge. */
+.tv { height: 100vh; display: grid; grid-template-rows: auto 1fr auto; gap: 2vh; padding: 3vh 3vw; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 2vw; border-bottom: 0.4vh solid var(--accent); padding-bottom: 1.5vh; }
+.brand { font-family: var(--display); letter-spacing: 0.4vw; color: var(--accent); font-size: 2.2vh; }
+.name { font-family: var(--display); font-weight: 600; font-size: 5vh; line-height: 1; }
+.right { display: flex; align-items: center; gap: 1.5vw; color: var(--muted); font-size: 2vh; }
+.dot { width: 1.4vh; height: 1.4vh; border-radius: 50%; background: var(--line); display: inline-block; margin-right: 0.6vw; vertical-align: middle; }
+.dot.live { background: var(--good); box-shadow: 0 0 1vh var(--good); }
+.dot.down { background: var(--bad); }
+.controls { display: flex; gap: 0.8vw; }
+button, select, input { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.controls button, .controls select { font-size: 1.6vh; padding: 0.6vh 1vw; }
+
+main { display: grid; grid-template-columns: 1.35fr 1fr; gap: 2vw; min-height: 0; }
+.panel { background: var(--panel); border-radius: 1.6vh; padding: 2.5vh 2vw; min-height: 0; display: flex; flex-direction: column; gap: 2vh; }
+.label { font-size: 1.7vh; letter-spacing: 0.15vw; text-transform: uppercase; color: var(--muted); }
+
+/* The latest stroke: one huge number, the rest in a grid under it. */
+.hero { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; border-radius: 1.4vh; padding: 0 1vw; transition: background-color 1.2s; }
+.hero.flash { background: rgba(232, 121, 46, 0.22); transition: none; }
+.big { font-family: var(--display); font-weight: 600; font-size: 24vh; line-height: 0.95; letter-spacing: -0.3vh; font-variant-numeric: tabular-nums; }
+.big small { font-size: 0.32em; color: var(--muted); letter-spacing: 0; margin-left: 1vw; font-weight: 500; }
+.mph { font-family: var(--display); font-size: 6vh; color: var(--accent); line-height: 1.1; }
+.ago { color: var(--muted); font-size: 2.2vh; margin-top: 1vh; }
+.badge { display: inline-block; margin-left: 1vw; padding: 0.3vh 0.8vw; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 1.8vh; font-weight: 600; vertical-align: middle; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2vh 1vw; }
+.metric { background: var(--panel-2); border-radius: 1.2vh; padding: 1.4vh 1vw; }
+.metric .v { font-family: var(--display); font-size: 5vh; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.metric .v small { font-size: 0.45em; color: var(--muted); margin-left: 0.3vw; }
+
+/* The session so far. */
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.2vh 1vw; }
+.stat .v { font-family: var(--display); font-size: 6vh; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.stat .s { color: var(--muted); font-size: 1.8vh; }
+.chart { flex: 1; min-height: 0; position: relative; }
+.recent { display: flex; gap: 0.6vw; overflow: hidden; }
+.chip { flex: 0 0 auto; background: var(--panel-2); border-radius: 1vh; padding: 0.8vh 0.8vw; text-align: center; min-width: 6vw; }
+.chip .v { font-family: var(--display); font-size: 3vh; font-variant-numeric: tabular-nums; }
+.chip .t { color: var(--muted); font-size: 1.4vh; }
+.chip.first { outline: 0.3vh solid var(--accent); }
+
+footer { color: var(--muted); font-size: 1.7vh; display: flex; justify-content: space-between; }
+.err { color: var(--bad); }
+
+/* Sign-in (only if this browser isn't signed in to the site yet). */
+.signin { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+.signin form { display: flex; flex-direction: column; gap: 10px; width: min(360px, 90vw); }
+.signin h2 { font-family: var(--display); font-weight: 500; margin: 0 0 6px; }
+.waiting { font-family: var(--display); font-size: 6vh; color: var(--muted); }
+[hidden] { display: none !important; }
+body.idle { cursor: none; } body.idle .controls { opacity: 0; } .controls { transition: opacity 0.4s; }
+</style>
+</head>
+<body>
+<div class="tv">
+  <header>
+    <div><div class="brand">CUE COACH · LIVE</div><div class="name" id="name">—</div></div>
+    <div class="right">
+      <span><span class="dot" id="dot"></span><span id="conn">Starting…</span></span>
+      <div class="controls">
+        <select id="player" hidden aria-label="Player"></select>
+        <button id="fs" title="Full screen (F)">Full screen</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="label">Last stroke</div>
+      <div class="hero" id="hero">
+        <div class="waiting" id="waiting">Waiting for the first stroke…</div>
+        <div id="shot" hidden>
+          <div class="big" id="speed">–<small>m/s</small></div>
+          <div class="mph"><span id="mph">–</span> mph<span class="badge" id="best-badge" hidden>Best today</span></div>
+          <div class="ago" id="ago"></div>
+        </div>
+      </div>
+      <div class="metrics" id="metrics"></div>
+    </section>
+
+    <section class="panel">
+      <div class="label" id="session-label">Today</div>
+      <div class="stats" id="stats"></div>
+      <div class="chart"><canvas id="chart"></canvas></div>
+      <div class="recent" id="recent"></div>
+    </section>
+  </main>
+
+  <footer><span id="status"></span><span id="clock"></span></footer>
+</div>
+
+<div class="signin" id="signin" hidden>
+  <form id="signin-form">
+    <h2>Sign in to Cue Coach</h2>
+    <input id="email" type="email" placeholder="Email" autocomplete="email" required>
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button class="primary" type="submit">Sign in</button>
+    <div id="signin-msg" class="err"></div>
+  </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
+<script>
+const MPH = 2.237, POLL_MS = 4000, MOCK_EVERY_MS = 4000, RECENT = 12;
+const params = new URLSearchParams(location.search);
+const mock = params.has("mock");
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 1) => (v == null || v === "" || Number.isNaN(v) ? "–" : Number(v).toFixed(d));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const good = (s) => s.impact_speed_mps > 0;  // the engine's few negative speeds are left out, as on the web page
+const key = (s) => `${s.recording_id}#${s.stroke_no}`;
+const timeOf = (s) => new Date(s.recorded_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+let db = null, me = null, playerCode = null, strokes = [], seen = new Set(), chart = null, timer = null, lastOk = 0;
+
+function setConn(state, text) { $("dot").className = `dot ${state}`; $("conn").textContent = text; }
+function status(text, bad) { $("status").textContent = text || ""; $("status").className = bad ? "err" : ""; }
+
+/** Today in the player's own day, as the view's local_date gives it: the browser's date is close enough for a TV in the room. */
+function today() { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+
+// ---- Data
+async function fetchToday() {
+  if (mock) return mockFeed();
+  const { data, error } = await db.from("stroke_facts")
+    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_g, backstroke_in, follow_through_in, straightness_yaw, cue_angle_impact, pause_seconds, low_confidence, error, cue")
+    .eq("player_code", playerCode).eq("local_date", today());
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// Mock: the busiest mock day, released one stroke at a time so the page can be watched working.
+let mockDay = null, mockStart = 0;
+async function mockFeed() {
+  if (!mockDay) {
+    const all = (await (await fetch("mock/stroke_facts.json")).json()).filter((s) => s.player_code === playerCode);
+    const counts = {}; all.forEach((s) => (counts[s.local_date] = (counts[s.local_date] || 0) + 1));
+    const day = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    mockDay = all.filter((s) => s.local_date === day).sort(order);
+    mockStart = Date.now();
+  }
+  const n = 1 + Math.floor((Date.now() - mockStart) / MOCK_EVERY_MS);
+  // Show the mock strokes as if they'd just happened.
+  return mockDay.slice(0, n).map((s, i) => ({ ...s, recorded_at: new Date(Date.now() - (n - 1 - i) * MOCK_EVERY_MS).toISOString() }));
+}
+
+const order = (a, b) => (a.recorded_at === b.recorded_at ? a.stroke_no - b.stroke_no : a.recorded_at < b.recorded_at ? -1 : 1);
+
+async function poll() {
+  try {
+    const rows = (await fetchToday()).filter((s) => !s.error).sort(order);
+    lastOk = Date.now();
+    setConn("live", "Live");
+    status(mock ? "Mock data: a past day replayed, one stroke every 4 s" : "");
+    const first = seen.size === 0 && strokes.length === 0;
+    const fresh = rows.filter((s) => !seen.has(key(s)));
+    rows.forEach((s) => seen.add(key(s)));
+    if (mock) strokes = rows; else strokes = strokes.concat(fresh).sort(order);
+    if (rows.length && (fresh.length || first)) draw(!first && fresh.length > 0);
+    if (!rows.length) drawEmpty();
+  } catch (e) {
+    setConn("down", "Can't reach Cue Coach");
+    status(`${e.message} · trying again`, true);
+  }
+  tickAgo();
+}
+
+// ---- Drawing
+function drawEmpty() {
+  $("waiting").hidden = false; $("shot").hidden = true;
+  $("metrics").innerHTML = ""; $("recent").innerHTML = "";
+  drawStats([]); drawChart([]);
+}
+
+function draw(isNew) {
+  const last = strokes[strokes.length - 1];
+  const speeds = strokes.filter(good).map((s) => s.impact_speed_mps);
+  const best = Math.max(...speeds);
+  $("waiting").hidden = true; $("shot").hidden = false;
+  $("name").textContent = last.player || playerCode;
+  $("speed").innerHTML = `${good(last) ? fmt(last.impact_speed_mps, 2) : "–"}<small>m/s${last.low_confidence ? " *" : ""}</small>`;
+  $("mph").textContent = good(last) ? fmt(last.impact_speed_mps * MPH) : "–";
+  $("best-badge").hidden = !(good(last) && speeds.length > 1 && last.impact_speed_mps >= best);
+  const m = (label, v, unit = "") => `<div class="metric"><div class="label">${label}</div><div class="v">${v}${unit && v !== "–" ? `<small>${unit}</small>` : ""}</div></div>`;
+  $("metrics").innerHTML = [
+    m("Backstroke", fmt(last.backstroke_in), "in"),
+    m("Follow-through", fmt(last.follow_through_in), "in"),
+    m("Straightness", fmt(last.straightness_yaw, 2)),
+    m("Cue angle", fmt(last.cue_angle_impact), "°"),
+    m("Peak g", fmt(last.peak_g)),
+    m("Pause", fmt(last.pause_seconds, 2), "s"),
+  ].join("");
+  drawStats(speeds);
+  drawChart(strokes);
+  $("recent").innerHTML = strokes.slice(-RECENT).reverse().map((s, i) =>
+    `<div class="chip ${i === 0 ? "first" : ""}"><div class="v">${good(s) ? fmt(s.impact_speed_mps, 2) : "–"}</div><div class="t">${timeOf(s)}</div></div>`).join("");
+  if (isNew) { const h = $("hero"); h.classList.add("flash"); requestAnimationFrame(() => requestAnimationFrame(() => h.classList.remove("flash"))); }
+}
+
+function drawStats(speeds) {
+  const n = speeds.length, avg = n ? speeds.reduce((a, b) => a + b, 0) / n : null;
+  const sd = n > 1 ? Math.sqrt(speeds.reduce((a, b) => a + (b - avg) ** 2, 0) / (n - 1)) : null;
+  const st = (label, v, sub) => `<div class="stat"><div class="label">${label}</div><div class="v">${v}</div><div class="s">${sub || "&nbsp;"}</div></div>`;
+  $("session-label").textContent = `Today · ${new Date().toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}`;
+  $("stats").innerHTML = [
+    st("Strokes", strokes.length, strokes.length ? `since ${timeOf(strokes[0])}` : ""),
+    st("Average", avg ? fmt(avg, 2) : "–", avg ? `m/s · ${fmt(avg * MPH)} mph` : ""),
+    st("Hardest", n ? fmt(Math.max(...speeds), 2) : "–", n ? `m/s · ${fmt(Math.max(...speeds) * MPH)} mph` : ""),
+    st("Steadiness", sd != null ? `±${fmt(sd, 2)}` : "–", sd != null ? "m/s spread · lower is steadier" : "needs 2 strokes"),
+  ].join("");
+}
+
+function drawChart(list) {
+  const pts = list.filter(good).slice(-40);
+  const data = { labels: pts.map(timeOf), datasets: [{ data: pts.map((s) => s.impact_speed_mps), backgroundColor: pts.map((_, i) => (i === pts.length - 1 ? "#e8792e" : "#6b6b73")), borderRadius: 4 }] };
+  const px = Math.round(window.innerHeight / 60);
+  if (chart) { chart.data = data; chart.update(); return; }
+  chart = new Chart($("chart"), {
+    type: "bar", data,
+    options: { maintainAspectRatio: false, animation: { duration: 300 },
+      plugins: { legend: { display: false }, tooltip: { enabled: false }, title: { display: true, text: "Speed, m/s (last 40)", color: "#b4b4bb", align: "start", font: { size: px } } },
+      scales: { x: { ticks: { display: false }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: "#b4b4bb", font: { size: px } }, grid: { color: "#3a3a40" } } } },
+  });
+}
+
+function tickAgo() {
+  const last = strokes[strokes.length - 1];
+  if (last) {
+    const secs = Math.max(0, Math.round((Date.now() - new Date(last.recorded_at)) / 1000));
+    $("ago").textContent = `${timeOf(last)} · ${secs < 60 ? `${secs} s ago` : secs < 3600 ? `${Math.round(secs / 60)} min ago` : "earlier today"}${last.cue ? ` · ${last.cue}` : ""}`;
+  }
+  $("clock").textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (lastOk && Date.now() - lastOk > 3 * POLL_MS) setConn("down", "Reconnecting…");
+}
+
+// ---- Start
+function begin() {
+  strokes = []; seen = new Set(); mockDay = null;
+  $("name").textContent = playerCode;
+  drawEmpty();
+  clearInterval(timer);
+  poll();
+  timer = setInterval(poll, POLL_MS);
+}
+
+async function start() {
+  if (mock) {
+    me = { role: "admin", player_code: params.get("player") || "BP01" };
+    playerCode = me.player_code;
+    status("Mock data: a past day replayed, one stroke every 4 s");
+    return begin();
+  }
+  if (window.CUE_CONFIG_MISSING || !window.CUE_CONFIG) return status("No config.js next to this page (or add ?mock=1).", true);
+  db = supabase.createClient(CUE_CONFIG.SUPABASE_URL, CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY);
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) { $("signin").hidden = false; return; }
+  $("signin").hidden = true;
+  const { data, error } = await db.from("profiles").select("*").eq("id", session.user.id).single();
+  if (error) return status(`Couldn't read your profile: ${error.message}`, true);
+  me = data;
+  // Coaches and admin pick a player; a player sees only themself (row-level security enforces it either way).
+  let players = [me];
+  if (["coach", "admin"].includes(me.role)) {
+    players = (await db.from("profiles").select("id, player_code, display_name").not("player_code", "is", null).order("player_code")).data || [];
+    if (me.role === "coach") {
+      const { data: links } = await db.from("coach_links").select("player_id").eq("coach_id", me.id);
+      const linked = new Set((links || []).map((l) => l.player_id));
+      players = players.filter((p) => linked.has(p.id));
+    }
+    $("player").innerHTML = players.map((p) => `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name)}</option>`).join("");
+    $("player").hidden = players.length < 2;
+  }
+  const wanted = params.get("player");
+  playerCode = (players.find((p) => p.player_code === wanted) || players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
+  if (!playerCode) return status("No players to show.", true);
+  $("player").value = playerCode;
+  begin();
+}
+
+$("player").onchange = () => {
+  playerCode = $("player").value;
+  const p = new URLSearchParams(location.search); p.set("player", playerCode);
+  history.replaceState(null, "", `?${p}`);  // a refresh or a bookmark keeps the player
+  begin();
+};
+$("signin-form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("signin-msg").textContent = "";
+  const { error } = await db.auth.signInWithPassword({ email: $("email").value, password: $("password").value });
+  if (error) return ($("signin-msg").textContent = error.message);
+  start();
+};
+
+// Full screen, keep the screen awake, hide the mouse and controls when nobody's touching it.
+const fullscreen = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.());
+$("fs").onclick = fullscreen;
+document.addEventListener("keydown", (e) => { if (e.key === "f" && e.target.tagName !== "INPUT") fullscreen(); });
+let wake = null;
+async function keepAwake() { try { wake = await navigator.wakeLock?.request("screen"); } catch {} }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { keepAwake(); poll(); } });
+keepAwake();
+let idleTimer = null;
+const wakeUp = () => { document.body.classList.remove("idle"); clearTimeout(idleTimer); idleTimer = setTimeout(() => document.body.classList.add("idle"), 4000); };
+["mousemove", "keydown", "touchstart"].forEach((ev) => document.addEventListener(ev, wakeUp));
+wakeUp();
+setInterval(tickAgo, 1000);
+window.addEventListener("resize", () => { if (chart) { chart.destroy(); chart = null; drawChart(strokes); } });
+start();
+</script>
+</body>
+</html>
