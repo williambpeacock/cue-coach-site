@@ -179,12 +179,11 @@ const METRICS = [
   { id: "backtime", label: "Backswing time", unit: "s", d: 2, v: (s) => s.backswing_seconds, why: "How long the backswing takes." },
   { id: "fwdtime", label: "Forward time", unit: "s", d: 2, v: (s) => s.forward_seconds, why: "How long the delivery takes." },
   { id: "fttime", label: "Follow-through time", unit: "ms", d: 0, v: (s) => s.follow_through_ms, why: "How long the cue keeps moving after the ball." },
-  { id: "g", label: "Peak g", unit: "g", d: 1, v: (s) => s.peak_g, why: "How hard the tip hit. Fun at a booth; little coaching value (the sensor tops out at 32 g)." },
 ];
 // Left/right turn in words (left negative, right positive), as the app's cards say it.
 function turn(d) { return d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${Math.abs(d).toFixed(1)}° ${d < 0 ? "left" : "right"}`; }
 const MAX_PICKS = 8;
-const ORIGINAL = ["back", "ft", "straight", "angle", "g", "pause"];
+const ORIGINAL = ["back", "ft", "straight", "angle", "pause"];
 const COACH_TOP = METRICS.slice(0, 6).map((m) => m.id);
 const STORE = "cueTvMetrics";
 function loadPicks() {
@@ -215,7 +214,7 @@ function today() { const d = new Date(); return new Date(d - d.getTimezoneOffset
 async function fetchToday() {
   if (mock) return mockFeed();
   const { data, error } = await db.from("stroke_facts")
-    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, peak_g, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, twist_before_net_deg, twist_before_range_deg, twist_before_band, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
+    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, twist_before_net_deg, twist_before_range_deg, twist_before_band, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
     .eq("player_code", playerCode).eq("local_date", today());
   if (error) throw new Error(error.message);
   return data;

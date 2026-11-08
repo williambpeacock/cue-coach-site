@@ -344,8 +344,8 @@ async function loadDay(date) {
       const q = new URLSearchParams({ recording: s.recording_id, stroke: s.stroke_no, label });
       return `<td><a href="viewer.html?${q}" target="_blank" rel="noopener">Path</a></td>`;
     };
-    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Twist</th><th>Cue angle °</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
-      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td title="cue twist before impact: net (+ = clockwise = right), range, and its band for shots of this speed">${twist(s)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
+    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Twist</th><th>Cue angle °</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
+      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td title="cue twist before impact: net (+ = clockwise = right), range, and its band for shots of this speed">${twist(s)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
     show("who", "day");
     status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
   } catch (e) { status(e.message, true); }
