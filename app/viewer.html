@@ -91,7 +91,7 @@ input[type=range] { accent-color: var(--accent); }
 
   <div class="chartbox" id="chartBox">
     <div class="label" id="chartTitle"></div>
-    <div class="legend"><span><i id="legSide"></i>Tip off line (one side +, other side −)</span><span><i id="legUp"></i>Tip up (+) or down (−) since contact</span></div>
+    <div class="legend"><span><i id="legSide"></i>Tip off line: right (+) or left (−) since contact</span><span><i id="legUp"></i>Tip up (+) or down (−) since contact</span></div>
     <canvas id="chart"></canvas>
   </div>
 
@@ -99,7 +99,7 @@ input[type=range] { accent-color: var(--accent); }
     <li>Angles come from the gyro and are measured against where the cue pointed at contact. "Tip" numbers are those angles at the grip-to-tip distance set in the settings.</li>
     <li>The grip is drawn sliding straight along the line. Only the cue's turning is measured, not the whole cue sliding sideways or up and down.</li>
     <li>For 30 ms after contact the hit shakes the sensor, so the direction is held still there (the grey band on the chart).</li>
-    <li>Which way is left and which is right is not confirmed yet, so the sides are not named.</li>
+    <li>Left and right are as the shooter sees them, standing behind the cue (confirmed with deliberate steers, 2026-11-07). In the top view the shooter's left is up the screen.</li>
   </ul>
   <div class="file" id="file"></div>
 </div>
@@ -158,7 +158,10 @@ let shot = 0, idx = 0, playing = false, last = 0, simT = 0;
 const cur = () => SHOTS[shot];
 const F = () => cur().frames;            // [t, grip_in, heading, elevation, twist]
 const elev0 = () => F()[F().findIndex(f => f[0] >= 0)][3];
+// heading is + when the tip turns to the shooter's left (steer set 2026-11-07); left/right words and
+// the chart use right +, left −, as the app does
 const sideIn = f => TIP * Math.sin(f[2] * RAD);
+const lr = (v, d, unit) => (Math.abs(v) < 0.05 ? "on line" : Math.abs(v).toFixed(d) + unit + (v > 0 ? " left" : " right"));
 const upIn = f => TIP * Math.sin((f[3] - elev0()) * RAD);
 
 SHOTS.forEach((d, i) => {
@@ -254,6 +257,7 @@ function drawView(canvas, kind) {
     ctx.fillStyle = S.grip.color; ctx.fillText("grip", X(f[1]) - 10, Y(gy) + rr + 13);
   }
   ctx.fillStyle = S.page.muted;
+  if (kind === "top") { const sl = "shooter's left ↑"; ctx.fillText(sl, w - ctx.measureText(sl).width - 10, 16); ctx.fillText("shooter's right ↓", 8, h - 10); }
   const note = (kind === "top" ? "sideways" : "up/down") + " enlarged " + k + "×";
   ctx.fillText(note, w - ctx.measureText(note).width - 10, h - 10);
 }
@@ -280,7 +284,7 @@ function drawChart() {
     ctx.strokeStyle = S.page.muted; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X(t), T); ctx.lineTo(X(t), h - B); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = S.page.muted; ctx.fillText(s, Math.min(X(t) + 4, w - R - ctx.measureText(s).width), h - 6);
   });
-  [[sideIn, S.trace.sideways_color], [upIn, S.trace.height_color]].forEach(([fn, color]) => {
+  [[f => -sideIn(f), S.trace.sideways_color], [upIn, S.trace.height_color]].forEach(([fn, color]) => {
     const pts = frames.map(f => [X(f[0]), Y(toUnit(fn(f)))]);
     drawPath(ctx, pts, color, 0.3);
     drawPath(ctx, pts.slice(0, idx + 1), color, 1);
@@ -293,8 +297,8 @@ function readout() {
   const sgn = v => (v > 0.05 ? "+" : v < -0.05 ? "−" : "") + Math.abs(v).toFixed(1);
   $("rT").textContent = (t >= 0 ? "+" : "−") + Math.abs(t).toFixed(2) + " s";
   $("rP").textContent = phase(t);
-  $("rH").textContent = Math.abs(f[2]).toFixed(1) + "°";
-  $("rO").textContent = Math.abs(toUnit(sideIn(f))).toFixed(1) + " " + UNIT;
+  $("rH").textContent = lr(f[2], 1, "°");
+  $("rO").textContent = lr(toUnit(sideIn(f)), 1, " " + UNIT);
   $("rU").textContent = sgn(toUnit(upIn(f))) + " " + UNIT;
   $("rW").textContent = sgn(f[4]) + "°";
 }
