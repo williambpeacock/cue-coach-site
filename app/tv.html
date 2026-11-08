@@ -161,31 +161,22 @@ const params = new URLSearchParams(location.search);
 
 // Every per-stroke number the TV can show, ranked by what a coach usually wants first.
 // v(s) gives the value (null when not measured); d = decimals.
-const tempo = (s) => (s.backswing_seconds > 0 && s.forward_seconds > 0 ? s.backswing_seconds / s.forward_seconds : null);
 const METRICS = [
   { id: "straight", label: "Straightness", unit: "/100", d: 0, v: (s) => s.straightness_score, sub: (s) => turn(s.straightness_turn_before_deg), why: "How well the cue stayed on its line before and after impact, against shots of similar speed. The first thing coaches fix; higher is straighter." },
-  { id: "ft", label: "Follow-through", unit: "in", d: 1, v: (s) => s.follow_through_in, why: "How far the cue keeps going through the ball. A short one usually means quitting on the shot." },
-  { id: "accel", label: "Speed lost before impact", unit: "%", d: 0, v: (s) => (s.speed_lost_fraction == null ? null : s.speed_lost_fraction * 100), why: "Slowing down into the ball instead of accelerating through it. Lower is better; 0 means still accelerating." },
-  { id: "pause", label: "Pause", unit: "s", d: 2, v: (s) => s.pause_seconds, why: "The stop at the back before the forward stroke. Rushing the transition is a classic fault." },
-  { id: "tempo", label: "Tempo", unit: ": 1", d: 1, v: tempo, why: "Backswing time over forward time. A smooth, slower backswing than delivery is the usual goal." },
+  { id: "timing", label: "Timing", unit: "/100", d: 0, v: (s) => s.timing_score, sub: (s) => s.timing_arrival_state ?? "", why: "How well the cue's speed was controlled: a smooth build-up, top speed at contact with no slowing into the ball, then a smooth slowdown, against shots of similar speed. Higher is smoother." },
   { id: "twist", label: "Cue twist", unit: "°", d: 1, signed: true, v: (s) => s.twist_before_net_deg ?? s.pre_impact_twist, sub: (s) => (s.twist_before_range_deg == null ? "" : `range ${s.twist_before_range_deg.toFixed(1)}° · ${s.twist_before_band}`), why: "The cue rolling on its own axis on the way to the ball (+ = clockwise from behind). Twist adds no spin; it usually comes with steering. The band compares it with shots of the same speed." },
+  { id: "pause", label: "Pause", unit: "s", d: 2, v: (s) => s.pause_seconds, why: "The stop at the back before the forward stroke. Rushing the transition is a classic fault." },
   { id: "back", label: "Backstroke", unit: "in", d: 1, v: (s) => s.backstroke_in, why: "Length of the backswing. Coaches look for the same length for the same shot." },
-  { id: "angle", label: "Cue angle", unit: "°", d: 1, v: (s) => s.cue_angle_impact, why: "Cue elevation at impact. Higher than needed makes the cue ball swerve and jump." },
-  { id: "pitch", label: "Up-and-down straightness", unit: "/100", d: 0, v: (s) => s.straightness_up_down_before, why: "Tip rising or dipping on the way to the ball, often from the elbow dropping. Higher is steadier." },
-  { id: "after", label: "Straight after impact", unit: "/100", d: 0, v: (s) => s.straightness_side_after, sub: (s) => turn(s.straightness_turn_after_deg), why: "The cue staying on line through the ball instead of swinging left or right. Higher is straighter." },
-  { id: "peak", label: "Peak speed", unit: "m/s", d: 2, v: (s) => s.peak_speed_mps, why: "The fastest the cue moved. Well above impact speed means it peaked too early." },
-  { id: "address", label: "Cue angle at address", unit: "°", d: 1, v: (s) => s.cue_angle_address, why: "Cue elevation in the set-up. Compare with the angle at impact." },
   { id: "fwd", label: "Forward stroke", unit: "in", d: 1, v: (s) => s.forward_stroke_in, why: "Distance from the back of the stroke to the ball." },
-  { id: "backtime", label: "Backswing time", unit: "s", d: 2, v: (s) => s.backswing_seconds, why: "How long the backswing takes." },
-  { id: "fwdtime", label: "Forward time", unit: "s", d: 2, v: (s) => s.forward_seconds, why: "How long the delivery takes." },
+  { id: "ft", label: "Follow-through", unit: "in", d: 1, v: (s) => s.follow_through_in, why: "How far the cue keeps going through the ball. A short one usually means quitting on the shot." },
   { id: "fttime", label: "Follow-through time", unit: "ms", d: 0, v: (s) => s.follow_through_ms, why: "How long the cue keeps moving after the ball." },
 ];
 // Left/right turn in words (left negative, right positive), as the app's cards say it.
 function turn(d) { return d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${Math.abs(d).toFixed(1)}° ${d < 0 ? "left" : "right"}`; }
 const MAX_PICKS = 8;
-const ORIGINAL = ["back", "ft", "straight", "angle", "pause"];
+const ORIGINAL = ["straight", "timing", "twist", "pause", "back", "fwd", "ft", "fttime"];  // Billy's metrics sheet, 2026-11-08
 const COACH_TOP = METRICS.slice(0, 6).map((m) => m.id);
-const STORE = "cueTvMetrics";
+const STORE = "cueTvMetrics2";  // new key 2026-11-08: every TV starts on the sheet's 8 once
 function loadPicks() {
   const known = (list) => list.filter((id) => METRICS.some((m) => m.id === id)).slice(0, MAX_PICKS);
   const fromUrl = known((params.get("m") || "").split(",").filter(Boolean));
@@ -214,7 +205,7 @@ function today() { const d = new Date(); return new Date(d - d.getTimezoneOffset
 async function fetchToday() {
   if (mock) return mockFeed();
   const { data, error } = await db.from("stroke_facts")
-    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, twist_before_net_deg, twist_before_range_deg, twist_before_band, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
+    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, twist_before_net_deg, twist_before_range_deg, twist_before_band, timing_score, timing_arrival_state, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
     .eq("player_code", playerCode).eq("local_date", today());
   if (error) throw new Error(error.message);
   return data;
