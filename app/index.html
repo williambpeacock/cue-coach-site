@@ -58,6 +58,9 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
 .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); }
 .tag.active { border-color: #4d7c4d; color: #a6e3a1; } .tag.invited { border-color: var(--accent); color: var(--accent); }
 .small { font-size: 12px; color: var(--muted); }
+#report-frame { width: 100%; height: 80vh; border: 0; border-radius: 10px; background: #0b0b0d; }
+.share-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.share-row input { flex: 1 1 220px; min-width: 0; }
 #people-table td, #people-table th { text-align: left; vertical-align: top; }
 #people-table select { padding: 4px 8px; }
 /* Admin Leads page (2026-11-05). */
@@ -113,6 +116,7 @@ tr.detail td { background: var(--panel-2); }
   <div id="home" hidden>
     <div style="display:flex;flex-direction:column;gap:18px">
       <section class="panel"><h2 id="latest-title">Latest session</h2><div class="cards" id="latest"></div></section>
+      <section class="panel" id="reports-panel" hidden><h2>Reports</h2><div class="table-wrap"><table id="reports"></table></div></section>
       <section class="panel"><h2>Week by week</h2><div class="charts">
         <div class="chart"><canvas id="c-speed"></canvas></div>
         <div class="chart"><canvas id="c-spread"></canvas></div>
@@ -130,6 +134,21 @@ tr.detail td { background: var(--panel-2); }
     <div><button class="link" id="back">← All sessions</button></div>
     <h2 id="day-title"></h2>
     <div class="table-wrap"><table id="strokes"></table></div>
+  </section>
+
+  <!-- A Cue Coach Report (2026-11-09), from the private "reports" bucket, in a sandboxed frame. -->
+  <section class="panel" id="report-view" hidden>
+    <div><button class="link" id="report-back">← Back</button></div>
+    <h2 id="report-title"></h2>
+    <div class="share-row">
+      <input id="share-email" type="email" placeholder="Email a link to (optional)" autocomplete="off">
+      <button class="primary" id="share-make">Make share link</button>
+    </div>
+    <div class="share-row" id="share-out-row" hidden>
+      <input id="share-out" readonly><button id="share-copy">Copy</button>
+    </div>
+    <div class="small" id="share-msg">Anyone with a share link can open this report for 90 days, without signing in.</div>
+    <iframe id="report-frame" title="Report" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>
   </section>
 
   <section class="panel" id="people" hidden>
@@ -204,7 +223,7 @@ tr.detail td { background: var(--panel-2); }
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "leads", "stock"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "leads", "stock", "report-view"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
@@ -218,7 +237,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const status = (text, bad) => { $("status").textContent = text || ""; $("status").className = bad ? "err" : "msg"; };
 
 // The data source: Supabase, or the mock files (same shapes as the views).
-let db = null, me = null, playerCode = null, charts = [];
+let db = null, me = null, playerCode = null, charts = [], playerIds = {};
 async function fromMock(name) { return (await fetch(`mock/${name}.json`)).json(); }
 async function rows(view, filter = {}) {
   if (mock) return (await fromMock(view)).filter((r) => Object.entries(filter).every(([k, v]) => r[k] === v));
@@ -262,13 +281,14 @@ async function signedIn() {
   if (me.role !== "player") {
     players = mock ? await fromMock("profiles") : (await db.from("profiles").select("id, player_code, display_name").not("player_code", "is", null).order("player_code")).data || [];
     if (me.role === "coach" && !mock) {
-      const { data: links } = await db.from("coach_links").select("player_id").eq("coach_id", me.id);
-      const linked = new Set((links || []).map((l) => l.player_id));
+      const { data: links } = await db.from("coach_links").select("student_id").eq("coach_id", me.id).eq("active", true);
+      const linked = new Set((links || []).map((l) => l.student_id));
       players = players.filter((p) => linked.has(p.id));
     }
     $("player").innerHTML = players.map((p) => `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name)}</option>`).join("");
     $("player").hidden = players.length < 2;
   }
+  playerIds = Object.fromEntries(players.map((p) => [p.player_code, p.id]));
   playerCode = (players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
   if (!playerCode) return status("No players to show yet.");
   $("player").value = playerCode;
@@ -286,6 +306,7 @@ async function loadPlayer() {
     drawLatest(sessions[0]);
     drawWeeks(weeks);
     drawSessions(sessions);
+    loadReports();
     if ($("people").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
@@ -356,6 +377,50 @@ async function loadDay(date) {
     status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
   } catch (e) { status(e.message, true); }
 }
+
+// ---- Reports (2026-11-09): the Cue Coach Reports saved for this player (cue_coach_report.py
+// --publish). The database decides who sees which: the player sees their own player reports,
+// coaches and admins also see coach reports. Share links go through the "report" edge function.
+const KIND = { player: "Player report", coach: "Coach report", booth: "Booth report" };
+let openReport = null;
+async function loadReports() {
+  $("reports-panel").hidden = true;
+  if (mock || !playerIds[playerCode]) return;
+  const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path")
+    .eq("owner_id", playerIds[playerCode]).order("created_at", { ascending: false });
+  if (error || !data?.length) return;
+  $("reports").innerHTML = "<tr><th style='text-align:left'>Report</th><th>Shots</th><th>Made</th><th>Made %</th><th>Kind</th></tr>" +
+    data.map((r, i) => `<tr class="clickable" data-i="${i}"><td style="text-align:left">${esc(r.title)}</td><td>${r.shots ?? "–"}</td><td>${r.made ?? "–"}</td><td>${r.shots ? Math.round((100 * r.made) / r.shots) + "%" : "–"}</td><td>${esc(KIND[r.kind] || r.kind)} <span class="small">${new Date(r.created_at).toLocaleDateString()}</span></td></tr>`).join("");
+  $("reports").querySelectorAll("tr.clickable").forEach((tr) => (tr.onclick = () => showReport(data[tr.dataset.i])));
+  $("reports-panel").hidden = false;
+}
+async function showReport(r) {
+  status("Loading…");
+  const { data, error } = await db.storage.from("reports").download(r.storage_path);
+  if (error) return status(`Couldn't open the report: ${error.message}`, true);
+  openReport = r;
+  $("report-title").textContent = r.title;
+  $("share-out-row").hidden = true; $("share-email").value = "";
+  $("share-msg").textContent = "Anyone with a share link can open this report for 90 days, without signing in.";
+  $("report-frame").srcdoc = (await data.text()).replace(/<head>/i, '<head><base target="_blank">');
+  show("who", "report-view");
+  status("");
+}
+$("report-back").onclick = () => show("who", "home");
+$("share-make").onclick = async () => {
+  if (!openReport) return;
+  const email = $("share-email").value.trim();
+  $("share-make").disabled = true; $("share-msg").textContent = "Making the link…";
+  try {
+    const { data, error } = await db.functions.invoke("report", { body: { action: "share", report_id: openReport.id, email } });
+    if (error || !data?.ok) throw new Error(data?.error || error?.message || "couldn't make the link");
+    $("share-out").value = data.url; $("share-out-row").hidden = false;
+    $("share-msg").textContent = `Link made, good until ${new Date(data.expires_at).toLocaleDateString()}` +
+      (email ? (data.emailed ? ` and emailed to ${email}.` : `, but the email didn't send: copy the link instead.`) : ".");
+  } catch (e) { $("share-msg").textContent = e.message; }
+  $("share-make").disabled = false;
+};
+$("share-copy").onclick = async () => { await navigator.clipboard.writeText($("share-out").value); $("share-copy").textContent = "Copied"; setTimeout(() => ($("share-copy").textContent = "Copy"), 1500); };
 
 // ---- Admin: People (2026-11-05). The people edge function does the work with the service key;
 // this page only sends the admin's own login (cloud/production/supabase/functions/people).

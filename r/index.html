@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Cue Coach Report</title>
+<!--
+  The viewer for private report links (2026-11-09): https://cue-coach.com/r/#t=<token>.
+  The token is after "#", so it never reaches the web server. The page asks the "report" edge
+  function for the report and shows it in a sandboxed frame (no scripts run in it). Published
+  as r/index.html in the cue-coach-site repo, next to app/.
+-->
+<style>
+  :root { --bg: #0b0b0d; --fg: #f4f4f5; --muted: #a1a1aa; --accent: #e8792e; --card: #18181b; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #fafafa; --fg: #18181b; --muted: #52525b; --card: #ffffff; }
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #report { border: 0; width: 100%; height: 100%; display: none; background: #0b0b0d; }
+  #message { max-width: 32rem; margin: 18vh auto 0; padding: 0 16px; text-align: center; line-height: 1.5; }
+  #message h1 { font-size: 1.4rem; margin: 0 0 .5rem; }
+  #message p { color: var(--muted); margin: 0 0 1rem; }
+  #message a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="message"><h1>Opening your report…</h1></div>
+<iframe id="report" title="Cue Coach Report" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>
+<script>
+  const FUNCTION = "https://lmpzqwqifqqebynhikiy.supabase.co/functions/v1/report";
+  const message = document.getElementById("message");
+  const frame = document.getElementById("report");
+
+  function show(title, text) {
+    message.innerHTML = "";
+    const h = document.createElement("h1"); h.textContent = title;
+    const p = document.createElement("p"); p.textContent = text;
+    const a = document.createElement("a"); a.href = "https://cue-coach.com"; a.textContent = "cue-coach.com";
+    message.append(h, p, a);
+  }
+
+  (async () => {
+    const token = new URLSearchParams(location.hash.slice(1)).get("t");
+    if (!token) return show("No report here", "This page opens Cue Coach Report links. Check the link was copied whole.");
+    try {
+      const res = await fetch(`${FUNCTION}?t=${encodeURIComponent(token)}`);
+      const out = await res.json();
+      if (!out.ok) return show("Can't open this report", out.error || "Something went wrong.");
+      document.title = out.title || "Cue Coach Report";
+      // Links in the report open in a new tab, outside the frame.
+      frame.srcdoc = out.html.replace(/<head>/i, '<head><base target="_blank">');
+      frame.style.display = "block";
+      message.style.display = "none";
+    } catch (e) {
+      show("Can't reach Cue Coach", "Check your connection and open the link again.");
+    }
+  })();
+</script>
+</body>
+</html>
