@@ -168,7 +168,7 @@ const METRICS = [
   { id: "accel", label: "Speed lost before impact", unit: "%", d: 0, v: (s) => (s.speed_lost_fraction == null ? null : s.speed_lost_fraction * 100), why: "Slowing down into the ball instead of accelerating through it. Lower is better; 0 means still accelerating." },
   { id: "pause", label: "Pause", unit: "s", d: 2, v: (s) => s.pause_seconds, why: "The stop at the back before the forward stroke. Rushing the transition is a classic fault." },
   { id: "tempo", label: "Tempo", unit: ": 1", d: 1, v: tempo, why: "Backswing time over forward time. A smooth, slower backswing than delivery is the usual goal." },
-  { id: "twist", label: "Wrist twist", unit: "°", d: 1, v: (s) => s.pre_impact_twist, why: "Cue rolling (screw) from address to impact. It puts unwanted side on the ball." },
+  { id: "twist", label: "Cue twist", unit: "°", d: 1, signed: true, v: (s) => s.twist_before_net_deg ?? s.pre_impact_twist, sub: (s) => (s.twist_before_range_deg == null ? "" : `range ${s.twist_before_range_deg.toFixed(1)}° · ${s.twist_before_band}`), why: "The cue rolling on its own axis on the way to the ball (+ = clockwise from behind). Twist adds no spin; it usually comes with steering. The band compares it with shots of the same speed." },
   { id: "back", label: "Backstroke", unit: "in", d: 1, v: (s) => s.backstroke_in, why: "Length of the backswing. Coaches look for the same length for the same shot." },
   { id: "angle", label: "Cue angle", unit: "°", d: 1, v: (s) => s.cue_angle_impact, why: "Cue elevation at impact. Higher than needed makes the cue ball swerve and jump." },
   { id: "pitch", label: "Up-and-down straightness", unit: "/100", d: 0, v: (s) => s.straightness_up_down_before, why: "Tip rising or dipping on the way to the ball, often from the elbow dropping. Higher is steadier." },
@@ -215,7 +215,7 @@ function today() { const d = new Date(); return new Date(d - d.getTimezoneOffset
 async function fetchToday() {
   if (mock) return mockFeed();
   const { data, error } = await db.from("stroke_facts")
-    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, peak_g, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
+    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, peak_g, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, twist_before_net_deg, twist_before_range_deg, twist_before_band, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
     .eq("player_code", playerCode).eq("local_date", today());
   if (error) throw new Error(error.message);
   return data;
@@ -293,7 +293,8 @@ function drawMetrics(s) {
   el.classList.toggle("four", picks.length > 6);
   if (!s) return (el.innerHTML = "");
   el.innerHTML = picks.map((id) => METRICS.find((m) => m.id === id)).map((m) => {
-    const v = fmt(m.v(s), m.d);
+    const raw = m.v(s);
+    const v = (m.signed && raw > 0 ? "+" : "") + fmt(raw, m.d);
     const sub = v !== "–" && m.sub ? m.sub(s) : "";
     return `<div class="metric"><div class="label">${m.label}</div><div class="v">${v}${v !== "–" ? `<small>${m.unit}</small>` : ""}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
   }).join("");

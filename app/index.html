@@ -118,6 +118,8 @@ tr.detail td { background: var(--panel-2); }
         <div class="chart"><canvas id="c-spread"></canvas></div>
         <div class="chart"><canvas id="c-back"></canvas></div>
         <div class="chart"><canvas id="c-yaw"></canvas></div>
+        <div class="chart"><canvas id="c-twist"></canvas></div>
+        <div class="chart"><canvas id="c-twist-sd"></canvas></div>
       </div></section>
       <section class="panel"><h2>Sessions</h2><div class="table-wrap"><table id="sessions"></table></div></section>
     </div>
@@ -205,6 +207,9 @@ const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "le
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
+// Cue twist v2 (#6): + = clockwise seen from behind the butt = right; range = most clockwise to most anticlockwise.
+const signed = (v, d = 1) => (v == null ? "–" : `${v > 0 ? "+" : ""}${fmt(v, d)}`);
+const twist = (s) => (s.twist_before_net_deg == null ? "–" : `${signed(s.twist_before_net_deg)}° <span class="small">range ${fmt(s.twist_before_range_deg)}° · ${esc(s.twist_before_band)}</span>`);
 const speed = (v) => (v == null || v <= 0 ? "–" : `${fmt(v, 2)} m/s · ${fmt(v * MPH, 1)} mph`);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const status = (text, bad) => { $("status").textContent = text || ""; $("status").className = bad ? "err" : "msg"; };
@@ -295,6 +300,8 @@ function drawLatest(s) {
     card("Follow-through", `${fmt(s.follow_through_avg_in)} in`),
     card("Straightness", fmt(s.straightness_score_avg, 0), s.straightness_score_avg == null ? "not measured yet" : "out of 100, higher is straighter"),
     card("Pause", `${fmt(s.pause_avg_s, 2)} s`, s.tempo_ratio_avg ? `tempo ${fmt(s.tempo_ratio_avg, 2)} : 1` : ""),
+    card("Cue twist", s.twist_net_median_deg == null ? "–" : `${signed(s.twist_net_median_deg)}°`, s.twist_net_median_deg == null ? "not measured yet"
+      : `spread ±${fmt(s.twist_net_sd_deg)}° · range ${fmt(s.twist_range_median_deg)}° · ${s.twist_low_strokes} of ${s.twist_strokes} low`),
   ].join("");
 }
 
@@ -312,12 +319,14 @@ function drawWeeks(weeks) {
     line("c-spread", "Speed spread (m/s, lower = steadier)", "speed_sd_mps"),
     line("c-back", "Backstroke (in)", "backstroke_avg_in"),
     line("c-yaw", "Straightness (out of 100, higher = straighter)", "straightness_score_avg"),
+    line("c-twist", "Cue twist before impact (°, median; + = clockwise)", "twist_net_median_deg"),
+    line("c-twist-sd", "Cue twist spread (°, lower = more consistent)", "twist_net_sd_deg"),
   ];
 }
 
 function drawSessions(sessions) {
-  $("sessions").innerHTML = "<tr><th>Date</th><th>Strokes</th><th>Speed m/s</th><th>± </th><th>Backstroke in</th><th>Straightness</th><th>Cue</th></tr>" +
-    sessions.map((s) => `<tr class="clickable" data-date="${s.local_date}"><td>${s.local_date}</td><td>${s.strokes}</td><td>${fmt(s.speed_avg_mps, 2)}</td><td>${fmt(s.speed_sd_mps, 2)}</td><td>${fmt(s.backstroke_avg_in)}</td><td>${fmt(s.straightness_score_avg, 0)}</td><td style="text-align:left">${esc(s.cues)}</td></tr>`).join("");
+  $("sessions").innerHTML = "<tr><th>Date</th><th>Strokes</th><th>Speed m/s</th><th>± </th><th>Backstroke in</th><th>Straightness</th><th>Twist °</th><th>Cue</th></tr>" +
+    sessions.map((s) => `<tr class="clickable" data-date="${s.local_date}"><td>${s.local_date}</td><td>${s.strokes}</td><td>${fmt(s.speed_avg_mps, 2)}</td><td>${fmt(s.speed_sd_mps, 2)}</td><td>${fmt(s.backstroke_avg_in)}</td><td>${fmt(s.straightness_score_avg, 0)}</td><td title="median net twist before impact, ± its spread">${s.twist_net_median_deg == null ? "–" : `${signed(s.twist_net_median_deg)} ±${fmt(s.twist_net_sd_deg)}`}</td><td style="text-align:left">${esc(s.cues)}</td></tr>`).join("");
   $("sessions").querySelectorAll("tr.clickable").forEach((tr) => (tr.onclick = () => loadDay(tr.dataset.date)));
 }
 
@@ -335,8 +344,8 @@ async function loadDay(date) {
       const q = new URLSearchParams({ recording: s.recording_id, stroke: s.stroke_no, label });
       return `<td><a href="viewer.html?${q}" target="_blank" rel="noopener">Path</a></td>`;
     };
-    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Cue angle °</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
-      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
+    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Twist</th><th>Cue angle °</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
+      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td title="cue twist before impact: net (+ = clockwise = right), range, and its band for shots of this speed">${twist(s)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
     show("who", "day");
     status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
   } catch (e) { status(e.message, true); }
