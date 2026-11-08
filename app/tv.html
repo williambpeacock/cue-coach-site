@@ -52,6 +52,7 @@ main { display: grid; grid-template-columns: 1.35fr 1fr; gap: 2vw; min-height: 0
 .metric { background: var(--panel-2); border-radius: 1.2vh; padding: 1.4vh 1vw; }
 .metric .v { font-family: var(--display); font-size: 5vh; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .metric .v small { font-size: 0.45em; color: var(--muted); margin-left: 0.3vw; }
+.metric .sub { font-size: 1.8vh; color: var(--muted); }
 
 /* The session so far. */
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.2vh 1vw; }
@@ -162,7 +163,7 @@ const params = new URLSearchParams(location.search);
 // v(s) gives the value (null when not measured); d = decimals.
 const tempo = (s) => (s.backswing_seconds > 0 && s.forward_seconds > 0 ? s.backswing_seconds / s.forward_seconds : null);
 const METRICS = [
-  { id: "straight", label: "Straightness", unit: "°", d: 2, v: (s) => s.straightness_yaw, why: "Side-to-side wobble of the cue through the stroke. The first thing coaches fix; lower is straighter." },
+  { id: "straight", label: "Straightness", unit: "/100", d: 0, v: (s) => s.straightness_score, sub: (s) => turn(s.straightness_turn_before_deg), why: "How well the cue stayed on its line before and after impact, against shots of similar speed. The first thing coaches fix; higher is straighter." },
   { id: "ft", label: "Follow-through", unit: "in", d: 1, v: (s) => s.follow_through_in, why: "How far the cue keeps going through the ball. A short one usually means quitting on the shot." },
   { id: "accel", label: "Speed lost before impact", unit: "%", d: 0, v: (s) => (s.speed_lost_fraction == null ? null : s.speed_lost_fraction * 100), why: "Slowing down into the ball instead of accelerating through it. Lower is better; 0 means still accelerating." },
   { id: "pause", label: "Pause", unit: "s", d: 2, v: (s) => s.pause_seconds, why: "The stop at the back before the forward stroke. Rushing the transition is a classic fault." },
@@ -170,7 +171,8 @@ const METRICS = [
   { id: "twist", label: "Wrist twist", unit: "°", d: 1, v: (s) => s.pre_impact_twist, why: "Cue rolling (screw) from address to impact. It puts unwanted side on the ball." },
   { id: "back", label: "Backstroke", unit: "in", d: 1, v: (s) => s.backstroke_in, why: "Length of the backswing. Coaches look for the same length for the same shot." },
   { id: "angle", label: "Cue angle", unit: "°", d: 1, v: (s) => s.cue_angle_impact, why: "Cue elevation at impact. Higher than needed makes the cue ball swerve and jump." },
-  { id: "pitch", label: "Up-and-down straightness", unit: "°", d: 2, v: (s) => s.straightness_pitch, why: "Tip rising or dipping through the stroke, often from the elbow dropping." },
+  { id: "pitch", label: "Up-and-down straightness", unit: "/100", d: 0, v: (s) => s.straightness_up_down_before, why: "Tip rising or dipping on the way to the ball, often from the elbow dropping. Higher is steadier." },
+  { id: "after", label: "Straight after impact", unit: "/100", d: 0, v: (s) => s.straightness_side_after, sub: (s) => turn(s.straightness_turn_after_deg), why: "The cue staying on line through the ball instead of swinging left or right. Higher is straighter." },
   { id: "peak", label: "Peak speed", unit: "m/s", d: 2, v: (s) => s.peak_speed_mps, why: "The fastest the cue moved. Well above impact speed means it peaked too early." },
   { id: "address", label: "Cue angle at address", unit: "°", d: 1, v: (s) => s.cue_angle_address, why: "Cue elevation in the set-up. Compare with the angle at impact." },
   { id: "fwd", label: "Forward stroke", unit: "in", d: 1, v: (s) => s.forward_stroke_in, why: "Distance from the back of the stroke to the ball." },
@@ -179,6 +181,8 @@ const METRICS = [
   { id: "fttime", label: "Follow-through time", unit: "ms", d: 0, v: (s) => s.follow_through_ms, why: "How long the cue keeps moving after the ball." },
   { id: "g", label: "Peak g", unit: "g", d: 1, v: (s) => s.peak_g, why: "How hard the tip hit. Fun at a booth; little coaching value (the sensor tops out at 32 g)." },
 ];
+// Left/right turn in words (left negative, right positive), as the app's cards say it.
+function turn(d) { return d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${Math.abs(d).toFixed(1)}° ${d < 0 ? "left" : "right"}`; }
 const MAX_PICKS = 8;
 const ORIGINAL = ["back", "ft", "straight", "angle", "g", "pause"];
 const COACH_TOP = METRICS.slice(0, 6).map((m) => m.id);
@@ -211,7 +215,7 @@ function today() { const d = new Date(); return new Date(d - d.getTimezoneOffset
 async function fetchToday() {
   if (mock) return mockFeed();
   const { data, error } = await db.from("stroke_facts")
-    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, peak_g, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_pitch, straightness_yaw, pre_impact_twist, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
+    .select("recording_id, stroke_no, recorded_at, local_date, player, impact_speed_mps, peak_speed_mps, peak_g, backstroke_in, forward_stroke_in, follow_through_in, follow_through_ms, cue_angle_address, cue_angle_impact, straightness_score, straightness_up_down_before, straightness_side_after, straightness_turn_before_deg, straightness_turn_after_deg, pre_impact_twist, backswing_seconds, pause_seconds, forward_seconds, speed_lost_fraction, low_confidence, error, cue")
     .eq("player_code", playerCode).eq("local_date", today());
   if (error) throw new Error(error.message);
   return data;
@@ -290,7 +294,8 @@ function drawMetrics(s) {
   if (!s) return (el.innerHTML = "");
   el.innerHTML = picks.map((id) => METRICS.find((m) => m.id === id)).map((m) => {
     const v = fmt(m.v(s), m.d);
-    return `<div class="metric"><div class="label">${m.label}</div><div class="v">${v}${v !== "–" ? `<small>${m.unit}</small>` : ""}</div></div>`;
+    const sub = v !== "–" && m.sub ? m.sub(s) : "";
+    return `<div class="metric"><div class="label">${m.label}</div><div class="v">${v}${v !== "–" ? `<small>${m.unit}</small>` : ""}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
   }).join("");
 }
 
@@ -298,7 +303,7 @@ function drawMetrics(s) {
 function drawPicker() {
   $("picker-list").innerHTML = METRICS.map((m, i) => `<li><label><span class="rank">${i + 1}</span>
     <input type="checkbox" value="${m.id}" ${picks.includes(m.id) ? "checked" : ""}>
-    <span><span class="what">${m.label}</span> <span class="why">(${m.unit.startsWith(":") ? "ratio" : m.unit})</span><br><span class="why">${m.why}</span></span></label></li>`).join("");
+    <span><span class="what">${m.label}</span> <span class="why">(${m.unit.startsWith(":") ? "ratio" : m.unit === "/100" ? "score" : m.unit})</span><br><span class="why">${m.why}</span></span></label></li>`).join("");
   const boxes = [...$("picker-list").querySelectorAll("input")];
   const sync = () => {
     picks = METRICS.map((m) => m.id).filter((id) => boxes.find((b) => b.value === id).checked);

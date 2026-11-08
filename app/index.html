@@ -178,6 +178,8 @@ const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
 const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "leads"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
+const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
+const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
 const speed = (v) => (v == null || v <= 0 ? "–" : `${fmt(v, 2)} m/s · ${fmt(v * MPH, 1)} mph`);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const status = (text, bad) => { $("status").textContent = text || ""; $("status").className = bad ? "err" : "msg"; };
@@ -265,7 +267,7 @@ function drawLatest(s) {
     card("Hardest", s.speed_max_mps ? `${fmt(s.speed_max_mps, 2)} m/s` : "–", s.speed_max_mps ? `${fmt(s.speed_max_mps * MPH)} mph` : ""),
     card("Backstroke", `${fmt(s.backstroke_avg_in)} in`, `±${fmt(s.backstroke_sd_in)} in`),
     card("Follow-through", `${fmt(s.follow_through_avg_in)} in`),
-    card("Straightness", fmt(s.straightness_yaw_abs_avg, 2), "lower is straighter"),
+    card("Straightness", fmt(s.straightness_score_avg, 0), s.straightness_score_avg == null ? "not measured yet" : "out of 100, higher is straighter"),
     card("Pause", `${fmt(s.pause_avg_s, 2)} s`, s.tempo_ratio_avg ? `tempo ${fmt(s.tempo_ratio_avg, 2)} : 1` : ""),
   ].join("");
 }
@@ -283,13 +285,13 @@ function drawWeeks(weeks) {
     line("c-speed", "Speed (m/s)", "speed_avg_mps"),
     line("c-spread", "Speed spread (m/s, lower = steadier)", "speed_sd_mps"),
     line("c-back", "Backstroke (in)", "backstroke_avg_in"),
-    line("c-yaw", "Straightness (lower = straighter)", "straightness_yaw_abs_avg"),
+    line("c-yaw", "Straightness (out of 100, higher = straighter)", "straightness_score_avg"),
   ];
 }
 
 function drawSessions(sessions) {
   $("sessions").innerHTML = "<tr><th>Date</th><th>Strokes</th><th>Speed m/s</th><th>± </th><th>Backstroke in</th><th>Straightness</th><th>Cue</th></tr>" +
-    sessions.map((s) => `<tr class="clickable" data-date="${s.local_date}"><td>${s.local_date}</td><td>${s.strokes}</td><td>${fmt(s.speed_avg_mps, 2)}</td><td>${fmt(s.speed_sd_mps, 2)}</td><td>${fmt(s.backstroke_avg_in)}</td><td>${fmt(s.straightness_yaw_abs_avg, 2)}</td><td style="text-align:left">${esc(s.cues)}</td></tr>`).join("");
+    sessions.map((s) => `<tr class="clickable" data-date="${s.local_date}"><td>${s.local_date}</td><td>${s.strokes}</td><td>${fmt(s.speed_avg_mps, 2)}</td><td>${fmt(s.speed_sd_mps, 2)}</td><td>${fmt(s.backstroke_avg_in)}</td><td>${fmt(s.straightness_score_avg, 0)}</td><td style="text-align:left">${esc(s.cues)}</td></tr>`).join("");
   $("sessions").querySelectorAll("tr.clickable").forEach((tr) => (tr.onclick = () => loadDay(tr.dataset.date)));
 }
 
@@ -308,7 +310,7 @@ async function loadDay(date) {
       return `<td><a href="viewer.html?${q}" target="_blank" rel="noopener">Path</a></td>`;
     };
     $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Peak g</th><th>Backstroke in</th><th>Follow-through in</th><th>Straightness</th><th>Cue angle °</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
-      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td>${fmt(s.straightness_yaw, 2)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
+      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.peak_g)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td>${fmt(s.cue_angle_impact)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
     show("who", "day");
     status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
   } catch (e) { status(e.message, true); }
