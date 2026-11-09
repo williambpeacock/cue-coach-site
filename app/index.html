@@ -260,7 +260,10 @@ async function start() {
   db.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") show("reset"); });
   const { data: { session } } = await db.auth.getSession();
   if (recovering && session) return show("reset");
-  if (!session) return show("signin");
+  if (!session) {
+    try { $("signin-msg").textContent = sessionStorage.getItem("signin-note") || ""; sessionStorage.removeItem("signin-note"); } catch (_) {}
+    return show("signin");
+  }
   const { data, error } = await db.from("profiles").select("*").eq("id", session.user.id).single();
   if (error) return status(`Couldn't read your profile: ${error.message}`, true);
   me = data;
@@ -413,8 +416,9 @@ $("share-make").onclick = async () => {
   const email = $("share-email").value.trim();
   $("share-make").disabled = true; $("share-msg").textContent = "Making the link…";
   try {
-    const { data, error } = await db.functions.invoke("report", { body: { action: "share", report_id: openReport.id, email } });
-    if (error || !data?.ok) throw new Error(data?.error || error?.message || "couldn't make the link");
+    const res = await callFunction("report", { method: "POST", body: JSON.stringify({ action: "share", report_id: openReport.id, email }) });
+    const data = await res.json().catch(() => null);
+    if (!data?.ok) throw new Error(data?.error || `couldn't make the link (HTTP ${res.status})`);
     $("share-out").value = data.url; $("share-out-row").hidden = false;
     $("share-msg").textContent = `Link made, good until ${new Date(data.expires_at).toLocaleDateString()}` +
       (email ? (data.emailed ? ` and emailed to ${email}.` : `, but the email didn't send: copy the link instead.`) : ".");
@@ -430,12 +434,7 @@ async function peopleCall(method, body) {
     if (method === "GET") return { ok: true, people: await fromMock("people") };
     return { ok: true, note: "mock: nothing sent", link: body.link ? "https://example.com/mock-link" : null };
   }
-  const { data: { session } } = await db.auth.getSession();
-  const res = await fetch(`${CUE_CONFIG.SUPABASE_URL}/functions/v1/people`, {
-    method,
-    headers: { Authorization: `Bearer ${session?.access_token ?? ""}`, apikey: CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const res = await callFunction("people", { method, body: body ? JSON.stringify(body) : undefined });
   const answer = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
   if (!answer.ok) throw new Error(answer.error || `HTTP ${res.status}`);
   return answer;
@@ -782,7 +781,33 @@ $("reset-form").onsubmit = async (e) => {
 $("setpw").onclick = () => show("reset");
 // Home (2026-11-09): back to the home screen from any page; staff's home is Leads.
 $("home-link").onclick = () => (me?.role === "staff" ? loadLeads() : (show("who", "home"), loadPlayer()));
-$("signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
+$("signout").onclick = () => signOutHere();
+
+// ---- Login upkeep (2026-11-08). A login can be ended elsewhere (the phone's Sign out used to end
+// every session) while this tab still holds its token. The database keeps answering until that token
+// times out, but the edge functions ask the auth server and get 401. So on a 401: refresh once and
+// retry; if that fails too, drop the login here and ask to sign in again.
+async function signOutHere(note) {
+  // scope "local" ends this browser's login only, never the phone's; don't wait long on the server.
+  try { await Promise.race([db?.auth.signOut({ scope: "local" }), new Promise((r) => setTimeout(r, 3000))]); } catch (_) {}
+  try { Object.keys(localStorage).filter((k) => k.startsWith("sb-")).forEach((k) => localStorage.removeItem(k)); } catch (_) {}
+  try { if (note) sessionStorage.setItem("signin-note", note); } catch (_) {}
+  location.reload();
+}
+async function callFunction(path, init = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data } = attempt ? await db.auth.refreshSession() : await db.auth.getSession();
+    if (!data?.session) break;
+    const res = await fetch(`${CUE_CONFIG.SUPABASE_URL}/functions/v1/${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${data.session.access_token}`, apikey: CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY, "Content-Type": "application/json" },
+    });
+    if (res.status !== 401) return res;
+  }
+  const note = "Your login had ended (for example, signed out on the phone): sign in again.";
+  await signOutHere(note);
+  throw new Error(note);
+}
 $("player").onchange = () => { playerCode = $("player").value; show("who", "home"); loadPlayer(); };
 $("back").onclick = () => { show("who", "home"); status(""); };
 start();
