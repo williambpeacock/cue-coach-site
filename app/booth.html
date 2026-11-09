@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Cue Coach Booth</title>
+<!-- The booth page (2026-11-09), for demos and trade shows: sign a visitor up, give them a booth
+     code to set on the phone (Setup, Guest shooter), and watch their report go out. The report is
+     built and emailed in the cloud ("booth" edge function) as soon as their drill set arrives.
+     Staff and admin only; the same sign-in and config.js as index.html. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1c1e22; --panel: #2a2a2e; --panel-2: #34343a; --line: #52525b;
+  --fg: #f4f4f5; --muted: #b4b4bb; --accent: #e8792e; --accent-ink: #1c1e22; --bad: #fca5a5; --good: #a6e3a1;
+  --display: "Oswald", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--body); }
+.page { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; border-bottom: 2px solid var(--accent); padding-bottom: 12px; }
+.brand { font-family: var(--display); font-size: 14px; letter-spacing: 3px; color: var(--accent); }
+h1 { margin: 2px 0 0; font-family: var(--display); font-weight: 600; font-size: 32px; line-height: 1.1; }
+h2 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 20px; }
+.panel { background: var(--panel); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+a.home, button.link { color: var(--accent); background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-decoration: none; }
+input[type=text], input[type=email] { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; width: 100%; }
+label.check { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; }
+label.check input { width: 22px; height: 22px; margin-top: 1px; accent-color: var(--accent); flex: none; }
+button.primary { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: none; border-radius: 10px; padding: 14px; cursor: pointer; }
+button.primary:disabled { opacity: .6; }
+button.small { font: inherit; font-size: 13px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.code { font-family: var(--display); font-size: 72px; font-weight: 600; line-height: 1; color: var(--accent); letter-spacing: 4px; }
+.muted { color: var(--muted); font-size: 14px; }
+.err { color: var(--bad); }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.sent { color: var(--good); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div><div class="brand">CUE COACH</div><h1>Booth</h1></div>
+    <a class="home" href="./">⌂ Home</a>
+  </header>
+
+  <section class="panel" id="need-signin" hidden>
+    <h2>Sign in first</h2>
+    <div class="muted">The booth page is for Cue Coach staff. Sign in on the home page, then come back.</div>
+    <a class="home" href="./">Go to sign in</a>
+  </section>
+
+  <section class="panel" id="form-panel" hidden>
+    <h2>New shooter</h2>
+    <form id="signup" autocomplete="off">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <input id="name" type="text" placeholder="Name" required>
+        <input id="email" type="email" placeholder="Email (the report goes here)" required inputmode="email">
+        <label class="check"><input id="updates" type="checkbox"> <span>Send me Cue Coach product updates.</span></label>
+        <label class="check"><input id="age13" type="checkbox"> <span>I'm 13 or older.</span></label>
+        <label class="check"><input id="privacy" type="checkbox"> <span>I agree that Cue Coach keeps my name, email and shots to make my report, and can delete them if I ask.</span></label>
+        <button class="primary" type="submit" id="go">Sign up and get a code</button>
+        <div id="form-msg" class="err"></div>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" id="code-panel" hidden>
+    <div class="muted" id="code-for"></div>
+    <div class="code" id="code"></div>
+    <div>On the phone: <b>Setup → Guest shooter</b>, enter this code, then shoot the drill. Their report is emailed as soon as the set is saved.</div>
+    <button class="small" id="next" style="align-self:flex-start">Next shooter</button>
+  </section>
+
+  <section class="panel" id="list-panel" hidden>
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2>Shooters</h2><button class="link" id="refresh">Refresh</button></div>
+    <div class="table-wrap"><table id="visitors"></table></div>
+    <div class="muted" id="list-msg"></div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let db = null;
+
+async function call(method, body) {
+  const { data, error } = await db.functions.invoke(method === "GET" ? "booth?list=1" : "booth", { method, body });
+  if (error) {
+    let msg = error.message;
+    try { msg = (await error.context.json()).error || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function start() {
+  if (window.CUE_CONFIG_MISSING || !window.CUE_CONFIG) return ($("need-signin").hidden = false);
+  db = supabase.createClient(CUE_CONFIG.SUPABASE_URL, CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY);
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) return ($("need-signin").hidden = false);
+  const { data: me } = await db.from("profiles").select("role").eq("id", session.user.id).single();
+  if (!me || !["admin", "staff"].includes(me.role)) {
+    $("need-signin").hidden = false;
+    $("need-signin").querySelector(".muted").textContent = "The booth page is for Cue Coach staff and admins.";
+    return;
+  }
+  $("form-panel").hidden = false; $("list-panel").hidden = false;
+  loadList();
+  setInterval(loadList, 15000);
+}
+
+$("signup").onsubmit = async (e) => {
+  e.preventDefault();
+  $("form-msg").textContent = ""; $("go").disabled = true;
+  try {
+    const out = await call("POST", { action: "signup", name: $("name").value, email: $("email").value,
+      updates: $("updates").checked, age13: $("age13").checked, privacy: $("privacy").checked });
+    if (!out.ok) throw new Error(out.error);
+    $("code").textContent = out.code;
+    $("code-for").textContent = out.returning ? `${out.name} has shot with us before: same code` : `${out.name}'s code`;
+    $("form-panel").hidden = true; $("code-panel").hidden = false;
+    loadList();
+  } catch (err) { $("form-msg").textContent = err.message; }
+  $("go").disabled = false;
+};
+
+$("next").onclick = () => {
+  $("signup").reset();
+  $("code-panel").hidden = true; $("form-panel").hidden = false;
+  $("name").focus();
+};
+$("refresh").onclick = () => loadList();
+
+async function loadList() {
+  try {
+    const out = await call("GET");
+    if (!out.ok) throw new Error(out.error);
+    const v = out.visitors;
+    $("list-msg").textContent = v.length ? "" : "Nobody yet.";
+    $("visitors").innerHTML = v.length ? "<tr><th>Code</th><th>Name</th><th>Shots</th><th>Report</th><th></th></tr>" + v.map((x) =>
+      `<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.name)}<div class="muted">${esc(x.email)}</div></td>` +
+      `<td>${x.shots ? `${x.made} of ${x.shots}` : "–"}</td>` +
+      `<td>${x.report_sent ? `<span class="sent">Sent ${new Date(x.report_sent).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>` : x.shots ? "Waiting" : "–"}</td>` +
+      `<td>${x.shots ? `<button class="small" data-code="${esc(x.code)}">${x.report_sent ? "Send again" : "Send now"}</button>` : ""}</td></tr>`).join("") : "";
+    $("visitors").querySelectorAll("button[data-code]").forEach((b) => (b.onclick = () => sendReport(b)));
+  } catch (err) { $("list-msg").textContent = err.message; }
+}
+
+async function sendReport(button) {
+  button.disabled = true; button.textContent = "Sending…";
+  try {
+    const out = await call("POST", { action: "report", code: button.dataset.code, force: true });
+    if (!out.ok) throw new Error(out.error);
+    button.textContent = out.emailed ? "Emailed" : "Made (email failed)";
+    loadList();
+  } catch (err) { button.textContent = "Try again"; button.disabled = false; $("list-msg").textContent = err.message; }
+}
+
+start();
+</script>
+</body>
+</html>

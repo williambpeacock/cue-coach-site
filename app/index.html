@@ -34,7 +34,7 @@ h2 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 20px; 
 .sub { color: var(--muted); font-size: 13px; }
 button, select, input { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-button.link { background: none; border: none; color: var(--accent); padding: 0; cursor: pointer; }
+button.link, a.link { background: none; border: none; color: var(--accent); padding: 0; cursor: pointer; text-decoration: none; font: inherit; }
 /* A password box with the eye beside it, to see what was typed (2026-11-05). */
 .pw { position: relative; display: block; }
 .pw input { width: 100%; box-sizing: border-box; padding-right: 40px; }
@@ -89,7 +89,7 @@ tr.detail td { background: var(--panel-2); }
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <span id="me"></span><button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
+      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -272,6 +272,7 @@ async function signedIn() {
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
   $("people-link").hidden = me.role !== "admin";
+  $("booth-link").hidden = !["admin", "staff"].includes(me.role);
   $("leads-link").hidden = !["admin", "staff"].includes(me.role);
   $("stock-link").hidden = !["admin", "staff"].includes(me.role);
   // Staff (2026-11-05) see Leads and Inventory (2026-11-08) and nothing else: no strokes, no People page.
@@ -779,6 +780,8 @@ $("reset-form").onsubmit = async (e) => {
   start();
 };
 $("setpw").onclick = () => show("reset");
+// Home (2026-11-09): back to the home screen from any page; staff's home is Leads.
+$("home-link").onclick = () => (me?.role === "staff" ? loadLeads() : (show("who", "home"), loadPlayer()));
 $("signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
 $("player").onchange = () => { playerCode = $("player").value; show("who", "home"); loadPlayer(); };
 $("back").onclick = () => { show("who", "home"); status(""); };
