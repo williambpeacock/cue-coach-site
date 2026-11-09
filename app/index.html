@@ -80,6 +80,26 @@ tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel-2
 tr.detail td { background: var(--panel-2); }
 .detail ul { margin: 4px 0 10px; padding-left: 18px; } .detail li { margin: 2px 0; }
 .counts { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; color: var(--muted); font-size: 14px; } .counts b { color: var(--fg); }
+/* Training log (2026-11-08). */
+.tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
+.tabs button { background: none; border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; color: var(--muted); font-family: var(--display); font-size: 16px; letter-spacing: .5px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.month { font-family: var(--display); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+.month:first-child { margin-top: 0; }
+.entry { display: grid; grid-template-columns: 64px 1fr auto; gap: 14px; align-items: center; width: 100%; text-align: left;
+  background: var(--panel); border: 1px solid transparent; border-radius: 12px; padding: 14px 16px; margin-bottom: 8px; cursor: pointer; }
+.entry:hover, .entry:focus-visible { border-color: var(--accent); outline: none; }
+.entry .date { text-align: center; line-height: 1.1; }
+.entry .dow { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.entry .dom { font-family: var(--display); font-size: 28px; font-weight: 600; }
+.entry .head { font-weight: 600; margin-bottom: 4px; }
+.entry .head .small { font-weight: 400; margin-left: 6px; }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; color: var(--muted); }
+.stats b { color: var(--fg); font-weight: 600; }
+.up { color: #a6e3a1; } .down { color: var(--bad); } .flat { color: var(--muted); }
+.badge { display: inline-block; font-size: 11px; letter-spacing: .5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); margin-left: 6px; font-weight: 600; }
+.entry .chev { color: var(--muted); font-size: 22px; }
+@media (max-width: 520px) { .entry { grid-template-columns: 48px 1fr; } .entry .chev { display: none; } .entry .dom { font-size: 24px; } }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -113,11 +133,20 @@ tr.detail td { background: var(--panel-2); }
     </form>
   </section>
 
+  <!-- Home (2026-11-08): a training log for the player. Log = one entry per session, newest first;
+       Progress = the week-by-week charts. A session opens to its stroke list. -->
   <div id="home" hidden>
     <div style="display:flex;flex-direction:column;gap:18px">
-      <section class="panel"><h2 id="latest-title">Latest session</h2><div class="cards" id="latest"></div></section>
-      <section class="panel" id="reports-panel" hidden><h2>Reports</h2><div class="table-wrap"><table id="reports"></table></div></section>
-      <section class="panel"><h2>Week by week</h2><div class="charts">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tab-log" aria-selected="true">Log</button>
+        <button role="tab" id="tab-progress" aria-selected="false">Progress</button>
+      </div>
+      <div id="log-view" style="display:flex;flex-direction:column;gap:18px">
+        <div class="cards" id="log-summary"></div>
+        <section class="panel" id="reports-panel" hidden><h2>Reports</h2><div class="table-wrap"><table id="reports"></table></div></section>
+        <div id="log"></div>
+      </div>
+      <section class="panel" id="progress-view" hidden><h2>Week by week</h2><div class="charts">
         <div class="chart"><canvas id="c-speed"></canvas></div>
         <div class="chart"><canvas id="c-spread"></canvas></div>
         <div class="chart"><canvas id="c-back"></canvas></div>
@@ -126,13 +155,14 @@ tr.detail td { background: var(--panel-2); }
         <div class="chart"><canvas id="c-twist-sd"></canvas></div>
         <div class="chart"><canvas id="c-timing"></canvas></div>
       </div></section>
-      <section class="panel"><h2>Sessions</h2><div class="table-wrap"><table id="sessions"></table></div></section>
     </div>
   </div>
 
   <section class="panel" id="day" hidden>
-    <div><button class="link" id="back">← All sessions</button></div>
+    <div><button class="link" id="back">← Training log</button></div>
     <h2 id="day-title"></h2>
+    <div class="cards" id="day-cards"></div>
+    <h2 style="font-size:16px;margin-top:6px">Strokes</h2>
     <div class="table-wrap"><table id="strokes"></table></div>
   </section>
 
@@ -307,20 +337,90 @@ async function loadPlayer() {
     weeks.sort((a, b) => (a.week_of > b.week_of ? 1 : -1));
     const name = sessions[0]?.player || playerCode;
     $("title").textContent = playerCode === me.player_code ? "Your stroke" : `${name}'s stroke`;
-    drawLatest(sessions[0]);
-    drawWeeks(weeks);
-    drawSessions(sessions);
+    allSessions = sessions; allWeeks = weeks;
+    drawSummary(sessions);
+    drawLog(sessions);
+    if (!$("progress-view").hidden) drawWeeks(weeks);
     loadReports();
     if ($("people").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
 
-function drawLatest(s) {
-  $("latest-title").textContent = s ? `Latest session · ${s.local_date}` : "Latest session";
-  if (!s) return ($("latest").innerHTML = "");
-  const card = (label, value, sub = "") => `<div class="card"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub}</div></div>`;
-  $("latest").innerHTML = [
+// ---- Training log (2026-11-08). One entry per session (a day), newest first, grouped by month.
+// Arrows compare a session with the player's previous 5; badges mark a best so far.
+let allSessions = [], allWeeks = [];
+const card = (label, value, sub = "") => `<div class="card"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub}</div></div>`;
+const dayOf = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
+const longDate = (iso) => dayOf(iso).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+// key, label, how to show it, the change that counts, and whether higher is better (null = neither).
+const LOG_STATS = [
+  { key: "speed_avg_mps", label: "Speed", show: (v) => `${fmt(v, 2)} m/s`, step: 0.1, better: null },
+  { key: "speed_sd_mps", label: "Spread", show: (v) => `±${fmt(v, 2)}`, step: 0.05, better: false, tip: "how much your speed varied; lower is steadier" },
+  { key: "straightness_score_avg", label: "Straightness", show: (v) => fmt(v, 0), step: 3, better: true },
+  { key: "timing_score_avg", label: "Timing", show: (v) => fmt(v, 0), step: 3, better: true },
+  { key: "backstroke_avg_in", label: "Backstroke", show: (v) => `${fmt(v)} in`, step: 0.5, better: null },
+];
+const BESTS = [
+  { key: "speed_max_mps", text: "Hardest yet" },
+  { key: "straightness_score_avg", text: "Straightest yet" },
+  { key: "timing_score_avg", text: "Best timing yet" },
+];
+function trend(stat, value, earlier) {
+  const before = mean(earlier.map((s) => s[stat.key]).filter((v) => v != null).map(Number));
+  if (value == null || before == null) return "";
+  const diff = Number(value) - before;
+  if (Math.abs(diff) < stat.step) return ` <span class="flat" title="about the same as your last sessions">→</span>`;
+  const cls = stat.better == null ? "flat" : (diff > 0) === stat.better ? "up" : "down";
+  return ` <span class="${cls}" title="${diff > 0 ? "up" : "down"} on your last ${earlier.length} sessions">${diff > 0 ? "↑" : "↓"}</span>`;
+}
+function drawSummary(sessions) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const monday = new Date(today); monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  const since = (from) => sessions.filter((s) => dayOf(s.local_date) >= from);
+  const count = (list) => list.reduce((n, s) => n + Number(s.strokes || 0), 0);
+  const week = since(monday), month = since(new Date(today.getTime() - 29 * 864e5));
+  const last = sessions[0] ? Math.round((today - dayOf(sessions[0].local_date)) / 864e5) : null;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  $("log-summary").innerHTML = sessions.length ? [
+    card("This week", plural(week.length, "session"), `${count(week)} strokes`),
+    card("Last 30 days", plural(month.length, "session"), `${count(month)} strokes`),
+    card("Last session", last === 0 ? "Today" : last === 1 ? "Yesterday" : `${last} days ago`, dayOf(sessions[0].local_date).toLocaleDateString([], { month: "short", day: "numeric" })),
+    card("All time", `${count(sessions)} strokes`, plural(sessions.length, "session")),
+  ].join("") : "";
+}
+function drawLog(sessions) {
+  let html = "", month = "";
+  sessions.forEach((s, i) => {
+    const earlier = sessions.slice(i + 1, i + 6), all = sessions.slice(i + 1);
+    const d = dayOf(s.local_date);
+    const m = d.toLocaleDateString([], { month: "long", year: "numeric" });
+    if (m !== month) { html += `<div class="month">${m}</div>`; month = m; }
+    const badges = all.length >= 3 ? BESTS.filter((b) => s[b.key] != null && all.every((e) => e[b.key] == null || Number(s[b.key]) > Number(e[b.key])))
+      .map((b) => `<span class="badge">${b.text}</span>`).join("") : "";
+    const stats = LOG_STATS.filter((st) => s[st.key] != null)
+      .map((st) => `<span${st.tip ? ` title="${st.tip}"` : ""}>${st.label} <b>${st.show(s[st.key])}</b>${trend(st, s[st.key], earlier)}</span>`).join("");
+    html += `<button class="entry" data-date="${s.local_date}">
+      <div class="date"><div class="dow">${d.toLocaleDateString([], { weekday: "short" })}</div><div class="dom">${d.getDate()}</div></div>
+      <div><div class="head">${s.strokes} strokes<span class="small">${s.recordings} recordings${s.cues ? ` · ${esc(s.cues)}` : ""}</span>${badges}</div>
+        <div class="stats">${stats || "No measurements"}</div></div>
+      <div class="chev">›</div></button>`;
+  });
+  $("log").innerHTML = html;
+  $("log").querySelectorAll(".entry").forEach((b) => (b.onclick = () => loadDay(b.dataset.date)));
+}
+function showTab(which) {
+  $("tab-log").setAttribute("aria-selected", which === "log"); $("tab-progress").setAttribute("aria-selected", which === "progress");
+  $("log-view").hidden = which !== "log"; $("progress-view").hidden = which !== "progress";
+  if (which === "progress") drawWeeks(allWeeks);  // drawn when visible so the charts get their size
+}
+$("tab-log").onclick = () => showTab("log");
+$("tab-progress").onclick = () => showTab("progress");
+
+function sessionCards(s) {
+  if (!s) return "";
+  return [
     card("Strokes", s.strokes, `${s.recordings} recordings`),
     card("Speed", s.speed_avg_mps ? `${fmt(s.speed_avg_mps, 2)} m/s` : "–", s.speed_avg_mps ? `${fmt(s.speed_avg_mps * MPH)} mph · ±${fmt(s.speed_sd_mps, 2)}` : ""),
     card("Hardest", s.speed_max_mps ? `${fmt(s.speed_max_mps, 2)} m/s` : "–", s.speed_max_mps ? `${fmt(s.speed_max_mps * MPH)} mph` : ""),
@@ -355,18 +455,14 @@ function drawWeeks(weeks) {
   ];
 }
 
-function drawSessions(sessions) {
-  $("sessions").innerHTML = "<tr><th>Date</th><th>Strokes</th><th>Speed m/s</th><th>± </th><th>Backstroke in</th><th>Straightness</th><th>Timing</th><th>Twist °</th><th>Cue</th></tr>" +
-    sessions.map((s) => `<tr class="clickable" data-date="${s.local_date}"><td>${s.local_date}</td><td>${s.strokes}</td><td>${fmt(s.speed_avg_mps, 2)}</td><td>${fmt(s.speed_sd_mps, 2)}</td><td>${fmt(s.backstroke_avg_in)}</td><td>${fmt(s.straightness_score_avg, 0)}</td><td>${fmt(s.timing_score_avg, 0)}</td><td title="median net twist before impact, ± its spread">${s.twist_net_median_deg == null ? "–" : `${signed(s.twist_net_median_deg)} ±${fmt(s.twist_net_sd_deg)}`}</td><td style="text-align:left">${esc(s.cues)}</td></tr>`).join("");
-  $("sessions").querySelectorAll("tr.clickable").forEach((tr) => (tr.onclick = () => loadDay(tr.dataset.date)));
-}
-
 async function loadDay(date) {
   status("Loading…");
   try {
     const strokes = (await rows("stroke_facts", { player_code: playerCode, local_date: date })).filter((s) => !s.error);
     strokes.sort((a, b) => (a.recorded_at === b.recorded_at ? a.stroke_no - b.stroke_no : a.recorded_at < b.recorded_at ? -1 : 1));
-    $("day-title").textContent = `${date} · ${strokes.length} strokes`;
+    $("day-title").textContent = `${longDate(date)} · ${strokes.length} strokes`;
+    $("day-cards").innerHTML = sessionCards(allSessions.find((s) => s.local_date === date));
+    window.scrollTo(0, 0);
     // The cue path viewer (viewer.html, 2026-11-06): admins and coaches only until left/right is confirmed.
     const paths = !mock && ["admin", "coach"].includes(me.role);
     const time = (s) => new Date(s.recorded_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
