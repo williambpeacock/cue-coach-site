@@ -99,6 +99,11 @@ tr.detail td { background: var(--panel-2); }
 .up { color: #a6e3a1; } .down { color: var(--bad); } .flat { color: var(--muted); }
 .badge { display: inline-block; font-size: 11px; letter-spacing: .5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); margin-left: 6px; font-weight: 600; }
 .entry .chev { color: var(--muted); font-size: 22px; }
+.perday-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.seg button { border: none; background: none; padding: 5px 12px; border-radius: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.perday-chart { height: 220px; }
 @media (max-width: 520px) { .entry { grid-template-columns: 48px 1fr; } .entry .chev { display: none; } .entry .dom { font-size: 24px; } }
 [hidden] { display: none !important; }
 </style>
@@ -144,6 +149,14 @@ tr.detail td { background: var(--panel-2); }
       </div>
       <div id="log-view" style="display:flex;flex-direction:column;gap:18px">
         <div class="cards" id="log-summary"></div>
+        <section class="panel" id="perday-panel" hidden>
+          <div class="perday-head"><h2>Shots per day</h2>
+            <div class="seg" role="group" aria-label="Days shown">
+              <button data-days="7">7 days</button><button data-days="30">30 days</button><button data-days="90">90 days</button>
+            </div></div>
+          <div class="perday-chart"><canvas id="c-perday"></canvas></div>
+          <div class="small" id="perday-note"></div>
+        </section>
         <section class="panel" id="reports-panel" hidden><h2>Reports</h2><div class="table-wrap"><table id="reports"></table></div></section>
         <div id="log"></div>
       </div>
@@ -341,6 +354,7 @@ async function loadPlayer() {
     allSessions = sessions; allWeeks = weeks;
     drawSummary(sessions);
     drawLog(sessions);
+    if (!$("log-view").hidden) drawPerDay(sessions);
     if (!$("progress-view").hidden) drawWeeks(weeks);
     loadReports();
     if ($("people").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
@@ -411,10 +425,46 @@ function drawLog(sessions) {
   $("log").innerHTML = html;
   $("log").querySelectorAll(".entry").forEach((b) => (b.onclick = () => loadDay(b.dataset.date)));
 }
+// Shots per day (2026-11-08): every day in the last 7/30/90, empty days included, in Cue Coach orange.
+let perDayChart = null, perDayDays = 30;
+try { perDayDays = Number(localStorage.getItem("perday-days")) || 30; } catch (_) {}
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function drawPerDay(sessions) {
+  $("perday-panel").hidden = !sessions.length;
+  if (!sessions.length) return;
+  document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.days) === perDayDays));
+  const byDay = Object.fromEntries(sessions.map((s) => [s.local_date, Number(s.strokes || 0)]));
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: perDayDays }, (_, i) => { const d = new Date(today); d.setDate(today.getDate() - (perDayDays - 1 - i)); return d; });
+  const counts = days.map((d) => byDay[isoDay(d)] || 0);
+  const labels = days.map((d) => d.toLocaleDateString([], perDayDays === 7 ? { weekday: "short", day: "numeric" } : { month: "short", day: "numeric" }));
+  const total = counts.reduce((a, b) => a + b, 0), active = counts.filter((c) => c > 0).length;
+  $("perday-note").textContent = `${total} shots on ${active} of the last ${perDayDays} days`;
+  perDayChart?.destroy();
+  perDayChart = new Chart($("c-perday"), {
+    type: "bar",
+    data: { labels, datasets: [{ data: counts, backgroundColor: "#e8792e", hoverBackgroundColor: "#f39a57", borderRadius: 4, maxBarThickness: 44 }] },
+    options: {
+      maintainAspectRatio: false, animation: { duration: 250 },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => days[it[0].dataIndex].toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }), label: (it) => `${it.raw} shots` } } },
+      scales: {
+        x: { ticks: { color: "#b4b4bb", autoSkip: true, maxTicksLimit: perDayDays === 7 ? 7 : 10, maxRotation: 0 }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: "#b4b4bb", precision: 0 }, grid: { color: "#3a3a40" } },
+      },
+    },
+  });
+}
+document.querySelectorAll(".seg button").forEach((b) => (b.onclick = () => {
+  perDayDays = Number(b.dataset.days);
+  try { localStorage.setItem("perday-days", perDayDays); } catch (_) {}
+  drawPerDay(allSessions);
+}));
+
 function showTab(which) {
   $("tab-log").setAttribute("aria-selected", which === "log"); $("tab-progress").setAttribute("aria-selected", which === "progress");
   $("log-view").hidden = which !== "log"; $("progress-view").hidden = which !== "progress";
   if (which === "progress") drawWeeks(allWeeks);  // drawn when visible so the charts get their size
+  else drawPerDay(allSessions);
 }
 $("tab-log").onclick = () => showTab("log");
 $("tab-progress").onclick = () => showTab("progress");
