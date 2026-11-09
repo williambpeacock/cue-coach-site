@@ -347,10 +347,10 @@
 
 <script>
   // Sign-ups go straight to Cue Coach's own database (Supabase), which emails each one (2026-11-05).
-  // For the first week they also still go to the Google Sheet, as a backup; the database counts
-  // the same sign-up once. To stop the Google copy: set SIGNUP_URL to ''.
+  // The Google Sheet copy was switched off 2026-11-08 (the Sheet stays as an archive); alerts go to
+  // team@cue-coach.com. To turn the Google copy back on, put its /exec URL in SIGNUP_URL.
   const LEAD_URL = 'https://lmpzqwqifqqebynhikiy.supabase.co/functions/v1/lead';
-  const SIGNUP_URL = 'https://script.google.com/macros/s/AKfycbwJ6sxeslWD9xxgWzhAWfUS4c4Xg99NWmZ5sRiGHYLX6PCBt5Kw9hj3tnmXcupKVdd_sQ/exec';
+  const SIGNUP_URL = '';
 
   const form = document.getElementById('signup-form');
   const errorBox = document.getElementById('su-error');
@@ -388,7 +388,14 @@
         btn.disabled = false; btn.textContent = 'Sign up';
         return;
       }
-    } catch (err) { /* the Google copy still has it */ }
+      if (!res.ok) throw new Error('status ' + res.status);
+    } catch (err) {
+      // Nothing else has the sign-up now, so say so instead of thanking them.
+      errorBox.textContent = "Sorry, that didn't go through. Please try again, or email team@cue-coach.com.";
+      errorBox.hidden = false;
+      btn.disabled = false; btn.textContent = 'Sign up';
+      return;
+    }
     showThanks();
   });
 </script>
