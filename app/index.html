@@ -105,6 +105,20 @@ tr.detail td { background: var(--panel-2); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .perday-chart { height: 220px; }
 @media (max-width: 520px) { .entry { grid-template-columns: 48px 1fr; } .entry .chev { display: none; } .entry .dom { font-size: 24px; } }
+/* Coaching (2026-11-13): the coach's Students page and the student's coach panel. */
+#students-table td, #students-table th, #invites-table td, #invites-table th { text-align: left; vertical-align: top; white-space: normal; }
+.step { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.step.review, .step.target { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.step.due, .step.testing { border-color: #4d7c4d; color: #a6e3a1; }
+.tag.sent { border-color: var(--accent); color: var(--accent); } .tag.accepted { border-color: #4d7c4d; color: #a6e3a1; }
+.tag.declined, .tag.expired { color: var(--muted); }
+.assign { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.assign label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.assign .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.assign select { max-width: 100%; }
+.invite-card { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.invite-card .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+.coach-lines { display: flex; flex-direction: column; gap: 4px; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -114,7 +128,7 @@ tr.detail td { background: var(--panel-2); }
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
+      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -148,6 +162,8 @@ tr.detail td { background: var(--panel-2); }
         <button role="tab" id="tab-progress" aria-selected="false">Progress</button>
       </div>
       <div id="log-view" style="display:flex;flex-direction:column;gap:18px">
+        <!-- Coaching (2026-11-13): invites to accept, your coach and your drill. Only on your own log. -->
+        <section class="panel" id="coach-panel" hidden></section>
         <div class="cards" id="log-summary"></div>
         <section class="panel" id="perday-panel" hidden>
           <div class="perday-head"><h2>Shots per day</h2>
@@ -216,6 +232,25 @@ tr.detail td { background: var(--panel-2); }
     <div class="table-wrap"><table id="people-table"></table></div>
   </section>
 
+  <!-- Coaching (2026-11-13, plan step 3): a coach's students and invites; admins see every coach's. -->
+  <section class="panel" id="students" hidden>
+    <div><button class="link" id="students-back">← Training log</button></div>
+    <h2>Invite a student</h2>
+    <p class="small">They get an email from team@cue-coach.com. Someone without a Cue Coach login gets a link to make one.
+      A student has one coach at a time: accepting your invite ends their link with any other coach.</p>
+    <form id="coach-invite-form" class="invite">
+      <label>Email <input id="ci-email" type="email" placeholder="student@example.com" autocomplete="off" required></label>
+      <label>Name <input id="ci-name" placeholder="For a new login (optional)" maxlength="100" autocomplete="off"></label>
+      <div class="buttons"><button class="primary" type="submit">Send invite</button></div>
+    </form>
+    <div id="students-msg" class="msg"></div>
+    <h2 style="margin-top:12px" id="students-head">Your students</h2>
+    <div class="table-wrap"><table id="students-table"></table></div>
+    <div id="assign-box" class="assign" hidden></div>
+    <h2 style="margin-top:12px">Invites</h2>
+    <div class="table-wrap"><table id="invites-table"></table></div>
+  </section>
+
   <section class="panel" id="leads" hidden>
     <div><button class="link" id="leads-back">← Strokes</button></div>
     <h2>Leads</h2>
@@ -267,7 +302,7 @@ tr.detail td { background: var(--panel-2); }
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "leads", "stock", "report-view"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "report-view"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
@@ -319,6 +354,7 @@ async function signedIn() {
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
   $("people-link").hidden = me.role !== "admin";
+  $("students-link").hidden = !["admin", "coach"].includes(me.role);
   $("booth-link").hidden = !["admin", "staff"].includes(me.role);
   $("leads-link").hidden = !["admin", "staff"].includes(me.role);
   $("stock-link").hidden = !["admin", "staff"].includes(me.role);
@@ -357,7 +393,8 @@ async function loadPlayer() {
     if (!$("log-view").hidden) drawPerDay(sessions);
     if (!$("progress-view").hidden) drawWeeks(weeks);
     loadReports();
-    if ($("people").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
+    loadMyCoaching();
+    if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
@@ -904,6 +941,272 @@ $("stock-link").onclick = () => loadStock();
 $("stock-back").onclick = () => { show("who", "home"); loadPlayer(); };
 $("stock-csv").onclick = downloadStockCsv;
 ["stock-search", "stock-loc"].forEach((id) => ($(id).oninput = drawStock));
+
+
+// ---- Coaching (2026-11-13, docs/plans/coaching_cloud_plan.md step 3). Every change goes through the
+// "coaching" edge function (the rules live in the database: coaching_act); the page reads the tables
+// directly, and their row-level security decides what each person sees.
+let mockC = null;
+async function coachingTables() {
+  if (mock && !mockC) mockC = await fromMock("coaching");
+}
+/** Rows of a coaching table: from Supabase, or from the mock file filtered by `keep`. */
+async function ctable(name, query, keep = () => true) {
+  if (mock) { await coachingTables(); return mockC[name].filter(keep); }
+  const { data, error } = await query(db.from(name).select("*"));
+  if (error) throw new Error(`${name}: ${error.message}`);
+  return data || [];
+}
+async function coachingCall(body) {
+  if (mock) return mockCoaching(body);
+  const res = await callFunction("coaching", { method: "POST", body: JSON.stringify(body) });
+  const answer = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  if (!answer.ok) throw new Error(answer.error || `HTTP ${res.status}`);
+  return answer;
+}
+/** What the coaching function would do, on the mock data (nothing is sent). */
+function mockCoaching(b) {
+  const now = new Date().toISOString(), result = {};
+  if (b.action === "invite") {
+    if (mockC.coach_invites.some((i) => i.coach_id === me.id && i.email === b.email.trim().toLowerCase() && i.status === "sent")) throw new Error("you have already invited them: send it again instead");
+    mockC.coach_invites.unshift({ id: `m-inv${Date.now()}`, coach_id: me.id, email: b.email.trim().toLowerCase(), student_id: null, status: "sent", created_at: now, expires_at: new Date(Date.now() + 30 * 864e5).toISOString() });
+    result.has_login = false;
+  } else if (b.action === "accept" || b.action === "decline") {
+    const inv = mockC.coach_invites.find((i) => i.id === b.invite_id);
+    inv.status = b.action === "accept" ? "accepted" : "declined";
+    if (b.action === "accept") {
+      mockC.coach_links.forEach((l) => { if (l.student_id === me.id && l.active) l.active = false; });
+      mockC.assignments.forEach((a) => { if (a.student_id === me.id && a.status === "active") a.status = "closed"; });
+      mockC.coach_links.push({ student_id: me.id, coach_id: inv.coach_id, active: true, created_at: now });
+    }
+  } else if (b.action === "end_link") {
+    mockC.coach_links.forEach((l) => { if (l.student_id === me.id && l.active) l.active = false; });
+    mockC.assignments.forEach((a) => { if (a.student_id === me.id && a.status === "active") a.status = "closed"; });
+  } else if (b.action === "assign") {
+    mockC.assignments.forEach((a) => { if (a.student_id === b.student_id && a.status === "active") a.status = b.end_current || "closed"; });
+    const d = mockC.drills.find((x) => x.drill_id === b.drill_id && x.level === b.level && x.active);
+    mockC.assignments.push({ id: `m-a${Date.now()}`, student_id: b.student_id, coach_id: me.id, drill_id: d.drill_id, drill_level: d.level, drill_version: d.version,
+      sets_per_test: b.sets_per_test, status: "active", target_set_at: null, due_date: null, created_at: now });
+  }
+  return { ok: true, result, emailed: 1, email_errors: [] };
+}
+
+const ASSIGNABLE = ["Make/miss", "Make + cue ball", "Cue ball zone"];  // as the database's assign rule
+let drillList = [];
+const drillOf = (a) => drillList.find((d) => d.drill_id === a.drill_id && d.level === a.drill_level && d.version === a.drill_version);
+const drillText = (a) => { const d = drillOf(a); return `${esc(d?.name || a.drill_id)}, level ${a.drill_level}`; };
+const testMax = (a) => { const d = drillOf(a); return d?.shots ? d.shots * (d.scoring === "Make/miss" ? 1 : 2) * a.sets_per_test : null; };
+const shortDay = (iso) => dayOf(iso.slice(0, 10)).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+const nameOf = (people, id) => { const p = people.find((x) => x.id === id); return p ? (p.display_name || p.player_code || "Someone") : "Someone"; };
+
+/** Where an assignment stands, in a few words (as the phone's coach tools, Coach.kt step()). */
+function stepOf(a, tests, forStudent) {
+  if (!a) return { key: "none", text: "No drill assigned" };
+  const ts = tests.filter((t) => t.assignment_id === a.id).sort((x, y) => (x.started_at < y.started_at ? -1 : 1));
+  const last = ts[ts.length - 1];
+  if (!last) return { key: "baseline", text: forStudent ? "Shoot your baseline test" : "Baseline test to shoot" };
+  if (last.status === "in_progress") return { key: "testing", text: "Shooting a test now" };
+  if (!last.reviewed_at) {
+    return { key: "review", text: forStudent ? "Test sent: waiting for your coach" : "Test waiting for your review" };
+  }
+  if (!a.target_set_at) return { key: "target", text: forStudent ? "Waiting for your coach's target" : "Set the target" };
+  if (a.due_date && a.due_date > isoDay(new Date())) return { key: "practice", text: `Practising · test due ${shortDay(a.due_date)}` };
+  return { key: "due", text: "Test due" };
+}
+
+// The student's own panel on their training log: invites, their coach, their drill.
+async function loadMyCoaching() {
+  const panel = $("coach-panel");
+  panel.hidden = true;
+  if (!me || me.role === "staff" || (me.player_code && playerCode !== me.player_code)) return;
+  try {
+    const [invites, links, assignments] = await Promise.all([
+      ctable("coach_invites", (q) => q.eq("status", "sent").neq("coach_id", me.id), (i) => i.status === "sent" && i.coach_id !== me.id && i.student_id === me.id),
+      ctable("coach_links", (q) => q.eq("student_id", me.id).eq("active", true), (l) => l.student_id === me.id && l.active),
+      ctable("assignments", (q) => q.eq("student_id", me.id).eq("status", "active"), (a) => a.student_id === me.id && a.status === "active"),
+    ]);
+    if (!invites.length && !links.length && !assignments.length) return;
+    const a = assignments.sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
+    const [people, tests, drills] = await Promise.all([
+      ctable("profiles", (q) => q.in("id", [...invites.map((i) => i.coach_id), ...links.map((l) => l.coach_id)])),
+      a ? ctable("tests", (q) => q.eq("assignment_id", a.id), (t) => t.assignment_id === a.id) : [],
+      ctable("drills", (q) => q),
+    ]);
+    drillList = drills;
+    const coach = links[0] ? nameOf(people, links[0].coach_id) : null;
+    let html = "";
+    for (const i of invites) {
+      html += `<div class="invite-card" data-inv="${esc(i.id)}"><div><b>${esc(nameOf(people, i.coach_id))}</b> invited you to be coached on Cue Coach.</div>
+        <div class="small">Your coach sees your shots and tests, sets you drills and targets.${coach ? ` Accepting ends your link with ${esc(coach)}.` : ""} Open until ${shortDay(i.expires_at)}.</div>
+        <div class="buttons"><button class="primary inv-accept">Accept</button><button class="inv-decline">Decline</button></div></div>`;
+    }
+    if (coach) {
+      const step = stepOf(a, tests, true);
+      const lines = [`<div><span class="label">Your coach</span><br><b>${esc(coach)}</b></div>`];
+      if (a) {
+        lines.push(`<div>Drill: <b>${drillText(a)}</b> · ${a.sets_per_test} sets a test</div>`, `<div><span class="step ${step.key}">${esc(step.text)}</span></div>`);
+        if (a.target_set_at && a.score_goal != null) {
+          lines.push(`<div class="small">Target: score ${fmt(a.score_goal, 0)}${testMax(a) ? ` of ${testMax(a)}` : ""}` +
+            (a.focus_metric && a.band_low != null ? ` · ${esc(a.focus_metric.replace(/_/g, " "))} ${fmt(a.band_low)} to ${fmt(a.band_high)} on ${Math.round((a.metric_goal ?? 0.8) * 100)}% of shots` : "") +
+            (a.due_date ? ` · next test ${shortDay(a.due_date)}` : "") + "</div>");
+        }
+        if (step.key === "baseline" || step.key === "due") lines.push(`<div class="small">Tests are shot in the app's Test mode: once you start, finish it the same day.</div>`);
+      } else lines.push(`<div class="small">No drill assigned yet.</div>`);
+      lines.push(`<div><button class="link" id="end-link">End coaching link</button></div>`);
+      html += `<div class="coach-lines">${lines.join("")}</div>`;
+    }
+    html += `<div id="coach-msg" class="msg"></div>`;
+    panel.innerHTML = html;
+    panel.hidden = false;
+    // After a reload the panel may be gone (no invites or coach left): then the page's status line says it.
+    const say = (text, bad) => { if (panel.hidden || !$("coach-msg")) return status(text, bad); $("coach-msg").textContent = text; $("coach-msg").className = bad ? "err" : "msg"; };
+    panel.querySelectorAll(".invite-card").forEach((card) => {
+      const respond = async (action) => {
+        say(action === "accept" ? "Accepting…" : "Declining…");
+        try {
+          await coachingCall({ action, invite_id: card.dataset.inv });
+          if (action === "accept" && !me.player_code && !mock) return start();  // a player code is given on accepting
+          await loadMyCoaching();
+          say(action === "accept" ? "Done: you're linked to your new coach." : "Declined. The coach has been told.");
+        } catch (e) { say(e.message, true); }
+      };
+      card.querySelector(".inv-accept").onclick = () => respond("accept");
+      card.querySelector(".inv-decline").onclick = () => respond("decline");
+    });
+    $("end-link")?.addEventListener("click", async () => {
+      if (!confirm(`End your coaching link with ${coach}? They'll stop seeing your shots, and your current drill closes. You keep all your data.`)) return;
+      try { await coachingCall({ action: "end_link" }); await loadMyCoaching(); say("Your coaching link has ended."); }
+      catch (e) { say(e.message, true); }
+    });
+  } catch (e) { panel.innerHTML = `<div class="err">Coaching: ${esc(e.message)}</div>`; panel.hidden = false; }
+}
+
+// The Students page: a coach's students and invites (admins: everyone's), assign a drill.
+let studentsState = null;
+async function loadStudents(note) {
+  show("who", "students");
+  $("title").textContent = "Students";
+  $("assign-box").hidden = true;
+  status("Loading…");
+  const admin = me.role === "admin";
+  try {
+    const mineL = (l) => l.active && (admin || l.coach_id === me.id), mineI = (i) => admin || i.coach_id === me.id;
+    const [links, invites, drills] = await Promise.all([
+      ctable("coach_links", (q) => (admin ? q : q.eq("coach_id", me.id)).eq("active", true), mineL),
+      ctable("coach_invites", (q) => (admin ? q : q.eq("coach_id", me.id)).order("created_at", { ascending: false }), mineI),
+      ctable("drills", (q) => q),
+    ]);
+    drillList = drills;
+    const studentIds = links.map((l) => l.student_id);
+    const ids = [...new Set([...studentIds, ...links.map((l) => l.coach_id), ...invites.map((i) => i.coach_id), ...invites.map((i) => i.student_id).filter(Boolean)])];
+    const [people, assignments] = await Promise.all([
+      ids.length ? ctable("profiles", (q) => q.in("id", ids), (p) => ids.includes(p.id)) : [],
+      studentIds.length ? ctable("assignments", (q) => q.in("student_id", studentIds).eq("status", "active"), (a) => studentIds.includes(a.student_id) && a.status === "active") : [],
+    ]);
+    const aIds = assignments.map((a) => a.id);
+    const tests = aIds.length ? await ctable("tests", (q) => q.in("assignment_id", aIds), (t) => aIds.includes(t.assignment_id)) : [];
+    studentsState = { links, invites, people, assignments, tests };
+    drawStudents(admin);
+    status("");
+    if (note) studentsMsg(note);
+  } catch (e) { status(`Students: ${e.message}`, true); }
+}
+
+function studentsMsg(text, bad) { $("students-msg").textContent = text || ""; $("students-msg").className = bad ? "err" : "msg"; }
+
+function drawStudents(admin) {
+  const { links, invites, people, assignments, tests } = studentsState;
+  $("students-head").textContent = admin ? "Students and their coaches" : "Your students";
+  const order = { review: 0, target: 1, due: 2, testing: 3, baseline: 4, none: 5, practice: 6 };
+  const rowsOut = links.map((l) => {
+    const p = people.find((x) => x.id === l.student_id) || { id: l.student_id };
+    const a = assignments.filter((x) => x.student_id === l.student_id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
+    return { l, p, a, step: stepOf(a, tests, false) };
+  }).sort((x, y) => order[x.step.key] - order[y.step.key] || nameOf(people, x.p.id).localeCompare(nameOf(people, y.p.id)));
+  $("students-table").innerHTML = `<tr><th>Student</th>${admin ? "<th>Coach</th>" : ""}<th>Drill</th><th>Where they are</th><th></th></tr>` +
+    (rowsOut.length ? "" : `<tr><td colspan="${admin ? 5 : 4}" class="small">No students yet: invite one above. They appear here once they accept.</td></tr>`) +
+    rowsOut.map(({ l, p, a, step }) => `<tr data-id="${esc(p.id)}">
+      <td><b>${esc(nameOf(people, p.id))}</b>${p.player_code ? ` <span class="small">${esc(p.player_code)}</span>` : ""}<br><span class="small">since ${when(l.created_at)}</span></td>
+      ${admin ? `<td>${esc(nameOf(people, l.coach_id))}</td>` : ""}
+      <td>${a ? `${drillText(a)}<br><span class="small">${a.sets_per_test} sets a test${a.score_goal != null ? ` · goal ${fmt(a.score_goal, 0)}${testMax(a) ? ` of ${testMax(a)}` : ""}` : ""}</span>` : `<span class="small">–</span>`}</td>
+      <td><span class="step ${step.key}">${esc(step.text)}</span></td>
+      <td>${p.player_code ? `<button class="link st-shots">Shots</button> · ` : ""}<button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button></td></tr>`).join("");
+  $("students-table").querySelectorAll("tr[data-id]").forEach((tr) => {
+    const r = rowsOut.find((x) => x.p.id === tr.dataset.id);
+    tr.querySelector(".st-shots")?.addEventListener("click", () => openStudentLog(r.p));
+    tr.querySelector(".st-assign").onclick = () => openAssign(r);
+  });
+
+  const STATUS = { sent: "Waiting", accepted: "Accepted", declined: "Declined", expired: "Expired" };
+  $("invites-table").innerHTML = `<tr><th>Email</th>${admin ? "<th>Coach</th>" : ""}<th>Sent</th><th>Status</th><th></th></tr>` +
+    (invites.length ? "" : `<tr><td colspan="${admin ? 5 : 4}" class="small">No invites yet.</td></tr>`) +
+    invites.map((i) => `<tr data-inv="${esc(i.id)}"><td>${esc(i.email)}${i.student_id ? ` <span class="small">${esc(nameOf(people, i.student_id))}</span>` : ""}</td>
+      ${admin ? `<td>${esc(nameOf(people, i.coach_id))}</td>` : ""}
+      <td>${when(i.created_at)}</td>
+      <td><span class="tag ${esc(i.status)}">${STATUS[i.status] || esc(i.status)}</span>${i.status === "sent" ? ` <span class="small">until ${when(i.expires_at)}</span>` : ""}
+        ${i.email_error ? `<br><span class="err small">email didn't send: ${esc(i.email_error)}</span>` : ""}</td>
+      <td>${i.status === "sent" ? `<button class="link inv-resend">Send again</button>` : ""}</td></tr>`).join("");
+  $("invites-table").querySelectorAll(".inv-resend").forEach((b) => (b.onclick = async () => {
+    const id = b.closest("tr").dataset.inv;
+    studentsMsg("Sending…");
+    try {
+      const r = await coachingCall({ action: "resend_invite", invite_id: id });
+      await loadStudents(r.email_errors?.length ? `Invite renewed for 30 days, but the email didn't send: ${r.email_errors[0]}` : "Sent again; the invite is open for 30 more days.");
+    } catch (e) { studentsMsg(e.message, true); }
+  }));
+}
+
+/** A student's training log, from the Students page (the player list above already has them). */
+function openStudentLog(p) {
+  if (![...$("player").options].some((o) => o.value === p.player_code)) {
+    $("player").insertAdjacentHTML("beforeend", `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name || "")}</option>`);
+    playerIds[p.player_code] = p.id;
+  }
+  $("player").hidden = $("player").options.length < 2;
+  playerCode = p.player_code; $("player").value = playerCode;
+  show("who", "home"); loadPlayer();
+}
+
+function openAssign({ p, a }) {
+  const box = $("assign-box"), name = nameOf(studentsState.people, p.id);
+  const choices = drillList.filter((d) => d.active && ASSIGNABLE.includes(d.scoring)).sort((x, y) => x.drill_id.localeCompare(y.drill_id) || x.level - y.level);
+  box.innerHTML = `<b>${a ? "New drill" : "Assign a drill"} for ${esc(name)}</b>
+    <div class="row">
+      <label style="flex:1 1 260px">Drill and level <select id="as-drill">${choices.map((d, i) => `<option value="${i}">${esc(d.drill_id)} · ${esc(d.name)} · level ${d.level} (${esc(d.scoring)}, ${d.shots} shots)</option>`).join("")}</select></label>
+      <label>Sets per test <input id="as-sets" type="number" min="1" max="10" value="3" style="width:90px"></label>
+    </div>
+    ${a ? `<label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="as-passed"> Mark ${drillText(a)} as passed (otherwise it's closed)</label>` : ""}
+    <div class="small">They start with a baseline test (the sets you choose, all in one day) and you set the target after seeing it. They get an email.</div>
+    <div class="row"><button class="primary" id="as-go">Assign</button><button id="as-cancel">Cancel</button></div>`;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("as-cancel").onclick = () => (box.hidden = true);
+  $("as-go").onclick = async () => {
+    const d = choices[Number($("as-drill").value)], sets = Number($("as-sets").value);
+    if (!d) return studentsMsg("Pick a drill.", true);
+    if (!(sets >= 1 && sets <= 10)) return studentsMsg("Sets per test is 1 to 10.", true);
+    $("as-go").disabled = true;
+    try {
+      const r = await coachingCall({ action: "assign", student_id: p.id, drill_id: d.drill_id, level: d.level, sets_per_test: sets,
+        ...(a ? { end_current: $("as-passed")?.checked ? "passed" : "closed" } : {}) });
+      await loadStudents(`${d.name}, level ${d.level} assigned to ${name}.` + (r.email_errors?.length ? ` The email didn't send: ${r.email_errors[0]}` : " They've been emailed."));
+    } catch (e) { studentsMsg(e.message, true); $("as-go").disabled = false; }
+  };
+}
+
+$("coach-invite-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $("ci-email").value.trim();
+  studentsMsg("Sending…");
+  try {
+    const r = await coachingCall({ action: "invite", email, name: $("ci-name").value.trim() || undefined });
+    $("ci-email").value = ""; $("ci-name").value = "";
+    await loadStudents(r.email_errors?.length ? `Invite made, but the email didn't send: ${r.email_errors[0]}. Try Send again.`
+      : `Invite sent to ${email}.${r.result?.has_login === false ? " They had no login, so the email has a link to make one." : ""}`);
+  } catch (err) { studentsMsg(err.message, true); }
+};
+$("students-link").onclick = () => loadStudents();
+$("students-back").onclick = () => { show("who", "home"); loadPlayer(); };
 
 $("signin-form").onsubmit = async (e) => {
   e.preventDefault();
