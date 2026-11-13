@@ -184,6 +184,20 @@ tr.detail td { background: var(--panel-2); }
       <div id="log-view" style="display:flex;flex-direction:column;gap:18px">
         <!-- Coaching (2026-11-13): invites to accept, your coach and your drill. Only on your own log. -->
         <section class="panel" id="coach-panel" hidden></section>
+        <!-- Fargo rating (2026-11-13): typed in by the player, their coach or an admin (FargoRate has no
+             public feed), every entry kept with its date. From fargo_ratings. -->
+        <section class="panel" id="fargo-panel" hidden>
+          <div class="perday-head"><h2>Fargo rating</h2><button id="fargo-update">Update</button></div>
+          <div id="fargo-now"></div>
+          <form class="invite" id="fargo-form" hidden>
+            <label>Rating<input id="fargo-rating" type="number" min="100" max="1000" step="1" inputmode="numeric" required></label>
+            <label>Fargo ID<input id="fargo-id" inputmode="numeric" pattern="[0-9]{1,10}" placeholder="optional"></label>
+            <label>As of<input id="fargo-date" type="date" required></label>
+            <div class="buttons"><button class="primary" type="submit">Save</button><button type="button" id="fargo-cancel">Cancel</button></div>
+          </form>
+          <div class="table-wrap"><table id="fargo-history"></table></div>
+          <div id="fargo-msg" class="msg"></div>
+        </section>
         <!-- Scoreboard (2026-11-13, coaching plan step 4): drills on the Cue Coach list, from drill_sets. -->
         <section class="panel" id="scoreboard-panel" hidden>
           <h2>Scoreboard</h2>
@@ -443,6 +457,7 @@ async function loadPlayer() {
     drawCalendar(sessions);
     loadReports();
     loadMyCoaching();
+    loadFargo();
     loadScoreboard();
     loadPayoff();
     if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
@@ -1344,6 +1359,70 @@ function stepOf(a, tests, forStudent) {
 }
 
 // The student's own panel on their training log: invites, their coach, their drill.
+// ---- Fargo rating (2026-11-13). Typed in by the player, their coach or an admin: FargoRate has no
+// public feed. Entries aren't edited; a wrong one is removed by whoever entered it (or an admin).
+let mockFargo = null;
+async function fargoEntries(id) {
+  if (mock) { mockFargo ??= await fromMock("fargo_ratings"); return mockFargo.filter((f) => f.player_id === id); }
+  const { data, error } = await db.from("fargo_ratings").select("*").eq("player_id", id)
+    .order("rated_on", { ascending: false }).order("id", { ascending: false });
+  if (error) throw new Error(`fargo_ratings: ${error.message}`);
+  return data || [];
+}
+const newestFirst = (a, b) => (a.rated_on !== b.rated_on ? (a.rated_on < b.rated_on ? 1 : -1) : b.id - a.id);
+const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+async function loadFargo() {
+  const panel = $("fargo-panel"), code = playerCode;
+  const id = playerIds[playerCode] || (playerCode === me?.player_code ? me.id : null);
+  panel.hidden = !id || me.role === "staff";
+  if (panel.hidden) return;
+  $("fargo-form").hidden = true; $("fargo-update").hidden = false; $("fargo-msg").textContent = "";
+  let entries;
+  try { entries = (await fargoEntries(id)).sort(newestFirst); } catch (e) { $("fargo-msg").textContent = e.message; return; }
+  if (code !== playerCode) return;  // another player was picked meanwhile
+  const own = playerCode === me.player_code, last = entries[0];
+  const fargoId = entries.find((f) => f.fargo_id)?.fargo_id || "";
+  $("fargo-now").innerHTML = last
+    ? `<div class="value">${last.rating}</div><div class="sub">as of ${shortDay(last.rated_on)}${fargoId ? ` · Fargo ID ${esc(fargoId)}` : ""}` +
+      `${last.robustness != null ? ` · ${last.robustness} games` : ""}</div>`
+    : `<div class="small">${own ? "No Fargo rating yet. Add yours and keep it up to date: it lets us see which drills and stroke numbers go with higher ratings." : "No Fargo rating entered yet."}</div>`;
+  $("fargo-update").textContent = last ? "Update" : "Add rating";
+  $("fargo-history").innerHTML = entries.length < 2 ? "" :
+    `<tr><th>Date</th><th>Rating</th><th>Change</th><th>Entered by</th><th></th></tr>` +
+    entries.slice(0, 12).map((f, i) => {
+      const prev = entries[i + 1], diff = prev ? f.rating - prev.rating : null;
+      const who = f.source === "fargorate" ? "FargoRate" : f.entered_by === me.id ? "You" : f.entered_by === id ? "Player" : "Coach or admin";
+      const canRemove = f.entered_by === me.id || me.role === "admin";
+      return `<tr><td>${shortDay(f.rated_on)}</td><td>${f.rating}</td><td>${diff == null ? "" : diff > 0 ? `+${diff}` : diff}</td>` +
+        `<td>${who}</td><td>${canRemove ? `<button class="link fargo-rm" data-id="${f.id}">Remove</button>` : ""}</td></tr>`;
+    }).join("");
+  $("fargo-id").value = fargoId;
+  panel.querySelectorAll(".fargo-rm").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Remove this Fargo entry?")) return;
+    try {
+      if (mock) mockFargo = mockFargo.filter((f) => String(f.id) !== b.dataset.id);
+      else { const { error } = await db.from("fargo_ratings").delete().eq("id", b.dataset.id); if (error) throw error; }
+      loadFargo();
+    } catch (e) { $("fargo-msg").textContent = `Couldn't remove it: ${e.message}`; }
+  }));
+}
+$("fargo-update").addEventListener("click", () => {
+  $("fargo-form").hidden = false; $("fargo-update").hidden = true;
+  $("fargo-rating").value = ""; $("fargo-date").value = todayIso(); $("fargo-date").max = todayIso();
+  $("fargo-rating").focus();
+});
+$("fargo-cancel").addEventListener("click", () => { $("fargo-form").hidden = true; $("fargo-update").hidden = false; });
+$("fargo-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const id = playerIds[playerCode] || (playerCode === me?.player_code ? me.id : null);
+  const row = { player_id: id, rating: Number($("fargo-rating").value), fargo_id: $("fargo-id").value.trim() || null, rated_on: $("fargo-date").value };
+  try {
+    if (mock) mockFargo.push({ ...row, id: Date.now(), robustness: null, source: "manual", entered_by: me.id });
+    else { const { error } = await db.from("fargo_ratings").insert(row); if (error) throw error; }
+    loadFargo();
+  } catch (e) { $("fargo-msg").textContent = `Couldn't save it: ${e.message}`; }
+});
+
 async function loadMyCoaching() {
   const panel = $("coach-panel");
   panel.hidden = true;
