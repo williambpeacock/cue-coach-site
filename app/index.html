@@ -105,6 +105,24 @@ tr.detail td { background: var(--panel-2); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .perday-chart { height: 220px; }
 @media (max-width: 520px) { .entry { grid-template-columns: 48px 1fr; } .entry .chev { display: none; } .entry .dom { font-size: 24px; } }
+/* Drill charts (2026-11-13): progress, effort legend, practice calendar, stroke payoff. */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.legend i.ln { height: 0; border-top: 2px solid; border-radius: 0; width: 16px; } .legend i.dash { border-top-style: dashed; }
+.legend i.dot { border-radius: 50%; width: 9px; height: 9px; } .legend i.tri { width: 0; height: 0; border-radius: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid #f4f4f5; }
+.cal-wrap { overflow-x: auto; padding-bottom: 4px; }
+.cal { display: grid; grid-template-rows: 14px repeat(7, 11px); grid-auto-flow: column; grid-auto-columns: 11px; gap: 3px; width: max-content; }
+.cal .m { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: visible; }
+.cal .d { border-radius: 2px; background: #34343a; }
+.cal-legend { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
+.cal-legend .d { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+.payoff-row { display: grid; grid-template-columns: minmax(9em, 15em) 1fr 4.5em; gap: 10px; align-items: center; font-size: 14px; }
+.payoff-bar { background: var(--panel-2); border-radius: 4px; height: 22px; overflow: hidden; }
+.payoff-bar div { height: 100%; border-radius: 0 4px 4px 0; }
+.payoff-row .v { text-align: right; font-weight: 600; }
+.payoff-big { font-size: 15px; }
+@media (max-width: 520px) { .payoff-row { grid-template-columns: 1fr 4em; } .payoff-row .payoff-bar { grid-column: 1 / -1; grid-row: 2; } }
 /* Coaching (2026-11-13): the coach's Students page and the student's coach panel. */
 #scoreboard td:first-child, #scoreboard th:first-child { text-align: left; white-space: normal; min-width: 10em; }
 #scoreboard .kind { color: var(--muted); font-size: 12px; }
@@ -172,14 +190,36 @@ tr.detail td { background: var(--panel-2); }
           <div class="table-wrap"><table id="scoreboard"></table></div>
           <div class="small" id="scoreboard-note"></div>
         </section>
+        <!-- Drill charts (2026-11-13): score per set over time, and whether a better stroke makes more balls. -->
+        <section class="panel" id="progress-panel" hidden>
+          <div class="perday-head"><h2>Drill progress</h2><select id="progress-drill" aria-label="Drill to show"></select></div>
+          <div class="legend" id="progress-legend"></div>
+          <div class="perday-chart"><canvas id="c-progress" role="img" aria-label="Score per drill set over time"></canvas></div>
+          <div class="small" id="progress-note"></div>
+        </section>
+        <section class="panel" id="payoff-panel" hidden>
+          <div class="perday-head"><h2>Does your stroke pay off?</h2>
+            <div class="seg" role="group" aria-label="Stroke measurement" id="payoff-seg">
+              <button data-m="straight">Straightness</button><button data-m="timing">Timing</button><button data-m="twist">Cue twist</button>
+            </div></div>
+          <div id="payoff"></div>
+          <div class="small" id="payoff-note"></div>
+        </section>
         <div class="cards" id="log-summary"></div>
         <section class="panel" id="perday-panel" hidden>
           <div class="perday-head"><h2>Shots per day</h2>
             <div class="seg" role="group" aria-label="Days shown">
               <button data-days="7">7 days</button><button data-days="30">30 days</button><button data-days="90">90 days</button>
             </div></div>
-          <div class="perday-chart"><canvas id="c-perday"></canvas></div>
+          <div class="legend" id="perday-legend"></div>
+          <div class="perday-chart"><canvas id="c-perday" role="img" aria-label="Shots per day by drill"></canvas></div>
           <div class="small" id="perday-note"></div>
+        </section>
+        <!-- Practice calendar (2026-11-13): the last year, a square a day, shaded by shots. -->
+        <section class="panel" id="calendar-panel" hidden>
+          <div class="perday-head"><h2>Practice calendar</h2><div class="small" id="calendar-streak"></div></div>
+          <div class="cal-wrap"><div class="cal" id="calendar" role="img" aria-label="Shots per day over the last year"></div></div>
+          <div class="cal-legend" id="calendar-legend"></div>
         </section>
         <section class="panel" id="reports-panel" hidden><h2>Reports</h2><div class="table-wrap"><table id="reports"></table></div></section>
         <div id="log"></div>
@@ -400,9 +440,11 @@ async function loadPlayer() {
     drawLog(sessions);
     if (!$("log-view").hidden) drawPerDay(sessions);
     if (!$("progress-view").hidden) drawWeeks(weeks);
+    drawCalendar(sessions);
     loadReports();
     loadMyCoaching();
     loadScoreboard();
+    loadPayoff();
     if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
@@ -493,9 +535,15 @@ function boardTrend(scores, max) {  // the last 5 sets against the 5 before them
 async function loadScoreboard() {
   const panel = $("scoreboard-panel"), code = playerCode;
   let sets;
+  allSets = [];
   try { sets = await rows("drill_sets", { player_code: code }); }
-  catch (e) { panel.hidden = true; return; }
+  catch (e) { panel.hidden = true; drawProgress(); return; }
   if (code !== playerCode) return;  // another player was picked meanwhile
+  allSets = sets;
+  playerAssignments = await activeAssignments();
+  if (code !== playerCode) return;
+  drawProgress();
+  if (!$("log-view").hidden) drawPerDay(allSessions);
   sets = sets.filter((s) => s.list_drill_id);
   panel.hidden = !sets.length;
   if (!sets.length) return;
@@ -541,32 +589,238 @@ async function loadScoreboard() {
 let perDayChart = null, perDayDays = 30;
 try { perDayDays = Number(localStorage.getItem("perday-days")) || 30; } catch (_) {}
 const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Since 2026-11-13 each day's bar is split by drill (sets in drill_sets); shots that weren't in a
+// drill set are "Not a drill". Colors follow the drill (by its id), never its rank, so a drill keeps
+// its color whatever the range.
+const DRILL_COLORS = ["#d95926", "#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9"];  // validated on the dark panel
+const OTHER_LIST = "#a8a29e", OWN_DRILLS = "#7c7c85", NOT_DRILL = "#55555d";
+function drillPalette() {  // list drill id -> color, the first six by id; the rest share OTHER_LIST
+  const ids = [...new Set(allSets.filter((s) => s.list_drill_id).map((s) => s.list_drill_id))].sort();
+  return Object.fromEntries(ids.map((id, i) => [id, DRILL_COLORS[i] || OTHER_LIST]));
+}
+const legendHtml = (items) => items.map(([label, color, kind = ""]) =>
+  `<span><i class="${kind}" style="${kind.includes("ln") ? `border-color:${color}` : kind === "tri" ? "" : `background:${color}`}"></i>${esc(label)}</span>`).join("");
 function drawPerDay(sessions) {
-  $("perday-panel").hidden = !sessions.length;
-  if (!sessions.length) return;
-  document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.days) === perDayDays));
+  $("perday-panel").hidden = !sessions.length && !allSets.length;
+  if (!sessions.length && !allSets.length) return;
+  document.querySelectorAll("#perday-panel .seg button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.days) === perDayDays));
   const byDay = Object.fromEntries(sessions.map((s) => [s.local_date, Number(s.strokes || 0)]));
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const days = Array.from({ length: perDayDays }, (_, i) => { const d = new Date(today); d.setDate(today.getDate() - (perDayDays - 1 - i)); return d; });
-  const counts = days.map((d) => byDay[isoDay(d)] || 0);
+  const keys = days.map(isoDay), inRange = new Set(keys);
+  // Drill shots per category per day.
+  const colors = drillPalette(), cats = new Map();  // category -> { color, perDay }
+  const cat = (name, color) => { if (!cats.has(name)) cats.set(name, { color, perDay: Object.fromEntries(keys.map((k) => [k, 0])) }); return cats.get(name); };
+  const firstOf = {};
+  allSets.filter((s) => s.list_drill_id).forEach((s) => { firstOf[s.list_drill_id] ??= s.list_name; });
+  const drillShots = Object.fromEntries(keys.map((k) => [k, 0]));
+  for (const s of allSets) {
+    if (!inRange.has(s.drill_date)) continue;
+    const name = !s.list_drill_id ? "Your own drills" : colors[s.list_drill_id] === OTHER_LIST ? "Other Cue Coach drills" : firstOf[s.list_drill_id];
+    const color = !s.list_drill_id ? OWN_DRILLS : colors[s.list_drill_id];
+    cat(name, color).perDay[s.drill_date] += Number(s.shots || 0);
+    drillShots[s.drill_date] += Number(s.shots || 0);
+  }
+  // Ordered: Cue Coach drills by id, then other list drills, own drills, then shots outside drills.
+  const order = Object.entries(colors).filter(([, c]) => c !== OTHER_LIST).map(([id]) => firstOf[id]).filter((n) => cats.has(n));
+  ["Other Cue Coach drills", "Your own drills"].forEach((n) => cats.has(n) && order.push(n));
+  const notDrill = keys.map((k) => Math.max(0, (byDay[k] || 0) - drillShots[k]));
+  const datasets = order.map((n) => ({ label: n, data: keys.map((k) => cats.get(n).perDay[k]), backgroundColor: cats.get(n).color }));
+  datasets.push({ label: datasets.length ? "Not a drill" : "Shots", data: notDrill, backgroundColor: datasets.length ? NOT_DRILL : "#e8792e" });
+  datasets.forEach((d) => Object.assign(d, { borderColor: "#2a2a2e", borderWidth: { top: 2 }, borderSkipped: "bottom", borderRadius: 4, maxBarThickness: 44, stack: "day" }));
+  const totals = keys.map((k, i) => datasets.reduce((a, d) => a + d.data[i], 0));
   const labels = days.map((d) => d.toLocaleDateString([], perDayDays === 7 ? { weekday: "short", day: "numeric" } : { month: "short", day: "numeric" }));
-  const total = counts.reduce((a, b) => a + b, 0), active = counts.filter((c) => c > 0).length;
-  $("perday-note").textContent = `${total} shots on ${active} of the last ${perDayDays} days`;
+  const total = totals.reduce((a, b) => a + b, 0), active = totals.filter((c) => c > 0).length;
+  const inDrills = keys.reduce((a, k) => a + drillShots[k], 0);
+  $("perday-note").textContent = `${total} shots on ${active} of the last ${perDayDays} days` + (inDrills ? `, ${inDrills} of them in drill sets.` : "");
+  $("perday-legend").innerHTML = datasets.length > 1 ? legendHtml(datasets.map((d) => [d.label, d.backgroundColor])) : "";
   perDayChart?.destroy();
   perDayChart = new Chart($("c-perday"), {
     type: "bar",
-    data: { labels, datasets: [{ data: counts, backgroundColor: "#e8792e", hoverBackgroundColor: "#f39a57", borderRadius: 4, maxBarThickness: 44 }] },
+    data: { labels, datasets },
     options: {
       maintainAspectRatio: false, animation: { duration: 250 },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { title: (it) => days[it[0].dataIndex].toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }), label: (it) => `${it.raw} shots` } } },
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: {
+        filter: (it) => it.raw > 0,
+        callbacks: { title: (it) => `${days[it[0].dataIndex].toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}: ${totals[it[0].dataIndex]} shots`,
+                     label: (it) => ` ${it.dataset.label}: ${it.raw}` } } },
       scales: {
-        x: { ticks: { color: "#b4b4bb", autoSkip: true, maxTicksLimit: perDayDays === 7 ? 7 : 10, maxRotation: 0 }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { color: "#b4b4bb", precision: 0 }, grid: { color: "#3a3a40" } },
+        x: { stacked: true, ticks: { color: "#b4b4bb", autoSkip: true, maxTicksLimit: perDayDays === 7 ? 7 : 10, maxRotation: 0 }, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, ticks: { color: "#b4b4bb", precision: 0 }, grid: { color: "#3a3a40" } },
       },
     },
   });
 }
-document.querySelectorAll(".seg button").forEach((b) => (b.onclick = () => {
+
+// ---- Drill progress (2026-11-13): one drill and level at a time; each scored set's score, the
+// average of the last 5, the best so far, and the coach's goal per set when an assignment sets one.
+let allSets = [], playerAssignments = [], progressChart = null;
+async function activeAssignments() {
+  const id = playerIds[playerCode] || (playerCode === me?.player_code ? me.id : null);
+  if (!id) return [];
+  try { return await ctable("assignments", (q) => q.eq("student_id", id).eq("status", "active"), (a) => a.student_id === id && a.status === "active"); }
+  catch (_) { return []; }
+}
+const shortDate = (iso) => dayOf(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+function drawProgress() {
+  const panel = $("progress-panel"), sel = $("progress-drill");
+  const scored = allSets.filter((s) => s.list_drill_id && s.scored)
+    .sort((a, b) => (a.drill_date + String(a.set_no).padStart(4, "0") < b.drill_date + String(b.set_no).padStart(4, "0") ? -1 : 1));
+  panel.hidden = !scored.length;
+  progressChart?.destroy(); progressChart = null;
+  if (!scored.length) return;
+  const groups = new Map();
+  for (const s of scored) { const k = `${s.list_drill_id}|${s.list_level}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); }
+  const keys = [...groups.keys()].sort();
+  let pick = sel.value;
+  if (!groups.has(pick)) {
+    let saved = null; try { saved = localStorage.getItem("progress-drill"); } catch (_) {}
+    const assigned = playerAssignments.map((a) => `${a.drill_id}|${a.drill_level}`).find((k) => groups.has(k));
+    const latest = scored[scored.length - 1];
+    pick = assigned || (groups.has(saved) ? saved : `${latest.list_drill_id}|${latest.list_level}`);
+  }
+  sel.innerHTML = keys.map((k) => { const f = groups.get(k)[0]; return `<option value="${k}">${esc(f.list_name)} · level ${f.list_level} (${groups.get(k).length} sets)</option>`; }).join("");
+  sel.value = pick;
+  const list = groups.get(pick), max = Number(list[0].max_score) || 1;
+  const scores = list.map((s) => Number(s.score));
+  const avg5 = scores.map((_, i) => (i < 4 ? null : mean(scores.slice(i - 4, i + 1))));
+  let best = -1; const bestSoFar = scores.map((v) => (best = Math.max(best, v)));
+  const [drillId, level] = pick.split("|");
+  const goalA = playerAssignments.find((a) => a.drill_id === drillId && String(a.drill_level) === level && a.score_goal != null);
+  const goal = goalA ? goalA.score_goal / (goalA.sets_per_test || 1) : null;
+  const labels = list.map((s) => shortDate(s.drill_date));
+  const datasets = [
+    { label: "Score", data: scores, showLine: false, order: 0,
+      pointStyle: list.map((s) => (s.is_test ? "triangle" : "circle")), pointRadius: list.map((s) => (s.is_test ? 7 : 4.5)), pointHoverRadius: 8,
+      pointBackgroundColor: list.map((s) => (s.is_test ? "#f4f4f5" : "#e8792e")), pointBorderColor: "#2a2a2e", pointBorderWidth: 2 },
+    { label: "Average of the last 5", data: avg5, borderColor: "#e8792e", borderWidth: 2, pointRadius: 0, tension: 0.3, spanGaps: true, order: 1 },
+    { label: "Best so far", data: bestSoFar, borderColor: "#b4b4bb", borderWidth: 2, borderDash: [5, 4], pointRadius: 0, stepped: true, order: 2 },
+  ];
+  if (goal != null) datasets.push({ label: "Coach's goal per set", data: list.map(() => goal), borderColor: "#3987e5", borderWidth: 2, borderDash: [2, 3], pointRadius: 0, order: 3 });
+  const items = [["Practice set", "#e8792e", "dot"]];
+  if (list.some((s) => s.is_test)) items.push(["Test set", "#f4f4f5", "tri"]);
+  items.push(["Average of the last 5", "#e8792e", "ln"], ["Best so far", "#b4b4bb", "ln dash"]);
+  if (goal != null) items.push([`Coach's goal: ${fmt(goal)} a set`, "#3987e5", "ln dash"]);
+  $("progress-legend").innerHTML = legendHtml(items);
+  const notScored = allSets.filter((s) => `${s.list_drill_id}|${s.list_level}` === pick && !s.scored).length;
+  $("progress-note").textContent = `Out of ${max} a set. Best ${Math.max(...scores)}, last ${scores[scores.length - 1]}.`
+    + (notScored ? ` ${notScored} set${notScored === 1 ? "" : "s"} not shown: short, unconfirmed, or no cue-ball marks.` : "");
+  progressChart = new Chart($("c-progress"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      maintainAspectRatio: false, animation: { duration: 250 },
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        title: (it) => { const s = list[it[0].dataIndex]; return `${longDate(s.drill_date)}, set ${s.set_no}${s.is_test ? " (test)" : ""}`; },
+        label: (it) => (it.raw == null ? null : ` ${it.dataset.label}: ${fmt(it.raw, it.datasetIndex === 0 ? 0 : 1)} / ${max}`) } } },
+      scales: {
+        x: { ticks: { color: "#b4b4bb", autoSkip: true, maxTicksLimit: 8, maxRotation: 0 }, grid: { display: false } },
+        y: { min: 0, max, ticks: { color: "#b4b4bb", precision: 0 }, grid: { color: "#3a3a40" } },
+      },
+    },
+  });
+}
+$("progress-drill").onchange = () => { try { localStorage.setItem("progress-drill", $("progress-drill").value); } catch (_) {} drawProgress(); };
+
+// ---- Practice calendar (2026-11-13): the last year, a square a day (weeks start Sunday), shaded by
+// shots that day in one orange ramp, light = few, bright = many (quartiles of the player's days).
+const CAL_STEPS = ["#5a3016", "#8f4a1f", "#c86426", "#f39a57"];
+function drawCalendar(sessions) {
+  const byDay = Object.fromEntries(sessions.filter((s) => Number(s.strokes) > 0).map((s) => [s.local_date, Number(s.strokes)]));
+  $("calendar-panel").hidden = !Object.keys(byDay).length;
+  if (!Object.keys(byDay).length) return;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = new Date(today); start.setDate(today.getDate() - 364 - today.getDay());  // a Sunday, 53 columns
+  const counts = Object.values(byDay).sort((a, b) => a - b);
+  const q = [0.25, 0.5, 0.75].map((f) => counts[Math.floor(f * (counts.length - 1))]);
+  const level = (n) => (n <= q[0] ? 0 : n <= q[1] ? 1 : n <= q[2] ? 2 : 3);
+  const cells = [];
+  let lastMonth = -1, col = 0;
+  for (const d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    if (d.getDay() === 0) {  // a new week: the month label row, then seven day cells
+      const m = d.getMonth();
+      cells.push(`<div class="m">${m !== lastMonth && col > 0 ? d.toLocaleDateString([], { month: "short" }) : ""}</div>`);
+      if (m !== lastMonth) lastMonth = m;
+      col++;
+    }
+    const k = isoDay(d), n = byDay[k] || 0;
+    const tip = `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" })}: ${n ? `${n} shots` : "no shots"}`;
+    cells.push(`<div class="d" title="${tip}" style="${n ? `background:${CAL_STEPS[level(n)]}` : ""}"></div>`);
+  }
+  $("calendar").innerHTML = cells.join("");
+  const yearDays = Object.keys(byDay).filter((k) => k >= isoDay(start));
+  let longest = 0, run = 0, prev = null;
+  for (const k of Object.keys(byDay).sort()) {
+    run = prev && (dayOf(k) - dayOf(prev)) / 864e5 === 1 ? run + 1 : 1;
+    longest = Math.max(longest, run); prev = k;
+  }
+  const now = daysInARow(Object.keys(byDay));
+  $("calendar-streak").textContent = `${now ? `${now} day${now === 1 ? "" : "s"} in a row` : "No streak right now"} · longest ${longest} · ${yearDays.length} days this year`;
+  $("calendar-legend").innerHTML = `Fewer <span class="d" style="background:#34343a"></span>${CAL_STEPS.map((c) => `<span class="d" style="background:${c}"></span>`).join("")} More shots`;
+}
+
+// ---- Does your stroke pay off? (2026-11-13): the make rate on drill shots when the stroke was good
+// against when it wasn't, from drill_results (each drill shot joined to its stroke). "Good" is the
+// coach's band when the student's assignment sets one for that measurement; otherwise the player's
+// better half of strokes (split at their own median), so it always compares the player with themself.
+const PAYOFF = {
+  straight: { name: "Straightness", focus: "straightness_overall", value: (m) => m?.rts?.straightness?.score, higher: true, unit: "", d: 0 },
+  timing: { name: "Timing", focus: null, value: (m) => m?.rts?.timing?.score, higher: true, unit: "", d: 0 },
+  twist: { name: "Cue twist", focus: "twist", value: (m) => m?.rts?.cue_twist?.before_net_deg, closer: 0, unit: "°", d: 1 },
+};
+let payoffShots = [], payoffMetric = "straight";
+try { payoffMetric = localStorage.getItem("payoff-metric") || "straight"; } catch (_) {}
+async function loadPayoff() {
+  const code = playerCode;
+  payoffShots = [];
+  try { payoffShots = await rows("drill_results", { player_code: code }); } catch (_) {}
+  if (code !== playerCode) return;
+  drawPayoff();
+}
+function drawPayoff() {
+  const m = PAYOFF[payoffMetric] || PAYOFF.straight;
+  const usable = (k) => payoffShots.filter((r) => r.result && PAYOFF[k].value(r.metrics) != null).length;
+  $("payoff-panel").hidden = !Object.keys(PAYOFF).some((k) => usable(k) > 0);
+  if ($("payoff-panel").hidden) return;
+  document.querySelectorAll("#payoff-seg button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.m === payoffMetric));
+  const shots = payoffShots.map((r) => ({ made: r.result === "made", v: Number(m.value(r.metrics)) })).filter((r) => m.value !== null && Number.isFinite(r.v));
+  if (shots.length < 20) {
+    $("payoff").innerHTML = `<div class="msg">Needs 20 drill shots with ${m.name.toLowerCase()} measured (${shots.length} so far).</div>`;
+    $("payoff-note").textContent = ""; return;
+  }
+  const band = playerAssignments.find((a) => a.focus_metric === m.focus && a.band_low != null && a.band_high != null);
+  let good, goodText, otherText;
+  if (band) {
+    good = (r) => r.v >= band.band_low && r.v <= band.band_high;
+    goodText = `In your coach's band (${fmt(band.band_low, m.d)} to ${fmt(band.band_high, m.d)}${m.unit})`; otherText = "Outside the band";
+  } else {
+    const score = (r) => (m.higher ? r.v : -Math.abs(r.v - m.closer));  // bigger = better
+    const sorted = shots.map(score).sort((a, b) => a - b), cut = sorted[Math.floor(sorted.length / 2)];
+    good = (r) => score(r) >= cut;
+    const cutText = m.higher ? `${fmt(cut, m.d)} or more` : `within ${fmt(-cut, m.d)}${m.unit} of straight`;
+    goodText = `Your better half (${m.name.toLowerCase()} ${cutText})`; otherText = "Your other half";
+  }
+  const g = shots.filter(good), o = shots.filter((r) => !good(r));
+  const rate = (xs) => (xs.length ? (100 * xs.filter((r) => r.made).length) / xs.length : null);
+  const rg = rate(g), ro = rate(o);
+  const row = (label, r, n, color) => `<div class="payoff-row"><div>${esc(label)}<div class="small">${n} shots</div></div>
+    <div class="payoff-bar" title="${r == null ? "no shots" : `${fmt(r, 0)}% made of ${n} shots`}"><div style="width:${r ?? 0}%;background:${color}"></div></div>
+    <div class="v">${r == null ? "–" : `${fmt(r, 0)}%`}</div></div>`;
+  const diff = rg != null && ro != null ? rg - ro : null;
+  const head = diff == null ? "" : Math.abs(diff) < 3 ? `<div class="payoff-big">About the same make rate either way so far.</div>`
+    : `<div class="payoff-big">Your make rate is <b>${fmt(Math.abs(diff), 0)} points ${diff > 0 ? "higher" : "lower"}</b> when your ${m.name.toLowerCase()} is ${band ? "in the band" : "in your better half"}.</div>`;
+  $("payoff").innerHTML = head + row(goodText, rg, g.length, "#e8792e") + row(otherText, ro, o.length, "#7c7c85");
+  $("payoff-note").textContent = `Made balls on ${shots.length} drill shots with ${m.name.toLowerCase()} measured, every drill.`
+    + (band ? " Good = your coach's band for this measurement." : " Split at your own middle value, so it compares you with yourself.");
+}
+document.querySelectorAll("#payoff-seg button").forEach((b) => (b.onclick = () => {
+  payoffMetric = b.dataset.m;
+  try { localStorage.setItem("payoff-metric", payoffMetric); } catch (_) {}
+  drawPayoff();
+}));
+document.querySelectorAll("#perday-panel .seg button").forEach((b) => (b.onclick = () => {
   perDayDays = Number(b.dataset.days);
   try { localStorage.setItem("perday-days", perDayDays); } catch (_) {}
   drawPerDay(allSessions);
