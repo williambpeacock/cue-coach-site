@@ -106,6 +106,8 @@ tr.detail td { background: var(--panel-2); }
 .perday-chart { height: 220px; }
 @media (max-width: 520px) { .entry { grid-template-columns: 48px 1fr; } .entry .chev { display: none; } .entry .dom { font-size: 24px; } }
 /* Coaching (2026-11-13): the coach's Students page and the student's coach panel. */
+#scoreboard td:first-child, #scoreboard th:first-child { text-align: left; white-space: normal; min-width: 10em; }
+#scoreboard .kind { color: var(--muted); font-size: 12px; }
 #students-table td, #students-table th, #invites-table td, #invites-table th { text-align: left; vertical-align: top; white-space: normal; }
 .step { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
 .step.review, .step.target { border-color: var(--accent); color: var(--accent); font-weight: 600; }
@@ -164,6 +166,12 @@ tr.detail td { background: var(--panel-2); }
       <div id="log-view" style="display:flex;flex-direction:column;gap:18px">
         <!-- Coaching (2026-11-13): invites to accept, your coach and your drill. Only on your own log. -->
         <section class="panel" id="coach-panel" hidden></section>
+        <!-- Scoreboard (2026-11-13, coaching plan step 4): drills on the Cue Coach list, from drill_sets. -->
+        <section class="panel" id="scoreboard-panel" hidden>
+          <h2>Scoreboard</h2>
+          <div class="table-wrap"><table id="scoreboard"></table></div>
+          <div class="small" id="scoreboard-note"></div>
+        </section>
         <div class="cards" id="log-summary"></div>
         <section class="panel" id="perday-panel" hidden>
           <div class="perday-head"><h2>Shots per day</h2>
@@ -394,6 +402,7 @@ async function loadPlayer() {
     if (!$("progress-view").hidden) drawWeeks(weeks);
     loadReports();
     loadMyCoaching();
+    loadScoreboard();
     if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
@@ -461,6 +470,72 @@ function drawLog(sessions) {
   });
   $("log").innerHTML = html;
   $("log").querySelectorAll(".entry").forEach((b) => (b.onclick = () => loadDay(b.dataset.date)));
+}
+// ---- Scoreboard (2026-11-13, coaching plan step 4). One row per drill, level and kind (practice or
+// test), for drills on the Cue Coach list only (drill_sets matches older sets by name). Scores come
+// from scored sets: full, confirmed and, for cue-ball drills, with cue-ball marks.
+const ymd = (d) => isoDay(d);
+function daysInARow(dates) {  // practice days in a row, ending today or yesterday
+  const have = new Set(dates);
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (!have.has(ymd(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (have.has(ymd(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+function boardTrend(scores, max) {  // the last 5 sets against the 5 before them
+  if (scores.length < 6) return `<span class="flat" title="needs 6 scored sets">–</span>`;
+  const last = mean(scores.slice(-5)), before = mean(scores.slice(-10, -5));
+  const diff = last - before;
+  if (Math.abs(diff) < 0.05 * max) return `<span class="flat" title="about the same as the 5 sets before">→</span>`;
+  return `<span class="${diff > 0 ? "up" : "down"}" title="last 5 sets against the 5 before">${diff > 0 ? "↑" : "↓"} ${diff > 0 ? "+" : ""}${fmt(diff)}</span>`;
+}
+async function loadScoreboard() {
+  const panel = $("scoreboard-panel"), code = playerCode;
+  let sets;
+  try { sets = await rows("drill_sets", { player_code: code }); }
+  catch (e) { panel.hidden = true; return; }
+  if (code !== playerCode) return;  // another player was picked meanwhile
+  sets = sets.filter((s) => s.list_drill_id);
+  panel.hidden = !sets.length;
+  if (!sets.length) return;
+  sets.sort((a, b) => (a.drill_date + String(a.set_no).padStart(4, "0") < b.drill_date + String(b.set_no).padStart(4, "0") ? -1 : 1));
+  const groups = new Map();
+  for (const s of sets) {
+    const key = `${s.list_drill_id}|${s.list_level}|${s.is_test ? "test" : "practice"}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  const keys = [...groups.keys()].sort((a, b) => {
+    const [da, la, ka] = a.split("|"), [db_, lb, kb] = b.split("|");
+    return da.localeCompare(db_) || la - lb || (ka === "practice" ? -1 : 1) + (kb === "practice" ? 1 : -1);
+  });
+  const score = (s) => `${s.score}<span class="small">/${s.max_score}</span>`;
+  let skipped = 0;
+  const body = keys.map((key) => {
+    const list = groups.get(key), kind = key.split("|")[2], first = list[0];
+    const scored = list.filter((s) => s.scored), values = scored.map((s) => Number(s.score));
+    const max = Number(first.max_score) || 1;
+    skipped += list.length - scored.length;
+    const last = scored[scored.length - 1], best = scored.reduce((b, s) => (!b || Number(s.score) > Number(b.score) ? s : b), null);
+    const avg10 = mean(values.slice(-10));
+    const sameDrill = sets.filter((s) => s.list_drill_id === first.list_drill_id && s.list_level === first.list_level);
+    const streak = kind === "practice" ? daysInARow(sameDrill.map((s) => s.drill_date)) : 0;
+    return `<tr><td>${esc(first.list_name)} <span class="small">L${first.list_level}</span> <span class="kind">${kind === "test" ? "Test" : "Practice"}</span></td>
+      <td>${list.length}${list.length > scored.length ? ` <span class="small" title="not scored: short, not confirmed, or no cue-ball marks">(${list.length - scored.length} not scored)</span>` : ""}</td>
+      <td>${last ? score(last) : "–"}</td>
+      <td>${best ? score(best) : "–"}</td>
+      <td>${avg10 == null ? "–" : `${fmt(avg10)}<span class="small">/${max}</span>`}</td>
+      <td>${boardTrend(values, max)}</td>
+      <td>${kind === "practice" ? (streak ? `${streak} day${streak === 1 ? "" : "s"}` : "–") : ""}</td></tr>`;
+  }).join("");
+  $("scoreboard").innerHTML = `<tr><th>Drill</th><th>Sets</th><th>Last</th><th>Best</th><th title="average of the last 10 scored sets">Last 10 avg</th><th>Trend</th><th title="days practised in a row, up to today or yesterday">Days in a row</th></tr>${body}`;
+  const allDays = daysInARow(sets.map((s) => s.drill_date));
+  $("scoreboard-note").textContent = [
+    allDays ? `${allDays} day${allDays === 1 ? "" : "s"} in a row on Cue Coach drills.` : "",
+    skipped ? "Not scored: a short or unconfirmed set, or an older cue-ball drill set shot before cue-ball marks." : "",
+    "A player's own drills aren't on the scoreboard.",
+  ].filter(Boolean).join(" ");
 }
 // Shots per day (2026-11-08): every day in the last 7/30/90, empty days included, in Cue Coach orange.
 let perDayChart = null, perDayDays = 30;
