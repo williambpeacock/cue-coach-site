@@ -309,6 +309,7 @@ tr.detail td { background: var(--panel-2); }
     <h2 style="margin-top:12px" id="students-head">Your students</h2>
     <div class="table-wrap"><table id="students-table"></table></div>
     <div id="assign-box" class="assign" hidden></div>
+    <div id="review-box" class="assign" hidden></div>
     <h2 style="margin-top:12px">Invites</h2>
     <div class="table-wrap"><table id="invites-table"></table></div>
   </section>
@@ -938,7 +939,8 @@ async function showReport(r) {
   show("who", "report-view");
   status("");
 }
-$("report-back").onclick = () => show("who", "home");
+let reportBack = null;  // where Back goes (the Students page when the report was opened from a test)
+$("report-back").onclick = () => { const back = reportBack; reportBack = null; back ? back() : show("who", "home"); };
 $("share-make").onclick = async () => {
   if (!openReport) return;
   const email = $("share-email").value.trim();
@@ -1331,6 +1333,15 @@ function mockCoaching(b) {
     const d = mockC.drills.find((x) => x.drill_id === b.drill_id && x.level === b.level && x.active);
     mockC.assignments.push({ id: `m-a${Date.now()}`, student_id: b.student_id, coach_id: me.id, drill_id: d.drill_id, drill_level: d.level, drill_version: d.version,
       sets_per_test: b.sets_per_test, status: "active", target_set_at: null, due_date: null, created_at: now });
+  } else if (b.action === "set_target") {
+    const a = mockC.assignments.find((x) => x.id === b.assignment_id);
+    Object.assign(a, { score_goal: b.score_goal, band_low: b.band_low ?? null, band_high: b.band_high ?? null, pass_rule: b.pass_rule || a.pass_rule,
+      metric_goal: b.metric_goal ?? a.metric_goal ?? 0.8, due_date: b.due_date, target_set_at: now });
+    mockC.tests.forEach((t) => { if (t.assignment_id === a.id && t.status !== "in_progress" && !t.reviewed_at) t.reviewed_at = now; });
+  } else if (b.action === "review") {
+    const t = mockC.tests.find((x) => x.id === b.test_id); t.reviewed_at ||= now;
+  } else if (b.action === "pass" || b.action === "close") {
+    mockC.assignments.find((x) => x.id === b.assignment_id).status = b.action === "pass" ? "passed" : "closed";
   }
   return { ok: true, result, emailed: 1, email_errors: [] };
 }
@@ -1494,7 +1505,7 @@ let studentsState = null;
 async function loadStudents(note) {
   show("who", "students");
   $("title").textContent = "Students";
-  $("assign-box").hidden = true;
+  $("assign-box").hidden = true; $("review-box").hidden = true;
   status("Loading…");
   const admin = me.role === "admin";
   try {
@@ -1538,11 +1549,12 @@ function drawStudents(admin) {
       ${admin ? `<td>${esc(nameOf(people, l.coach_id))}</td>` : ""}
       <td>${a ? `${drillText(a)}<br><span class="small">${a.sets_per_test} sets a test${a.score_goal != null ? ` · goal ${fmt(a.score_goal, 0)}${testMax(a) ? ` of ${testMax(a)}` : ""}` : ""}</span>` : `<span class="small">–</span>`}</td>
       <td><span class="step ${step.key}">${esc(step.text)}</span></td>
-      <td>${p.player_code ? `<button class="link st-shots">Shots</button> · ` : ""}<button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button></td></tr>`).join("");
+      <td>${lastTest(a, tests) ? `<button class="link st-review">${step.key === "review" || step.key === "target" ? "<b>Review test…</b>" : "Last test…"}</button> · ` : ""}${p.player_code ? `<button class="link st-shots">Shots</button> · ` : ""}<button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button></td></tr>`).join("");
   $("students-table").querySelectorAll("tr[data-id]").forEach((tr) => {
     const r = rowsOut.find((x) => x.p.id === tr.dataset.id);
     tr.querySelector(".st-shots")?.addEventListener("click", () => openStudentLog(r.p));
     tr.querySelector(".st-assign").onclick = () => openAssign(r);
+    tr.querySelector(".st-review")?.addEventListener("click", () => openReview(r));
   });
 
   const STATUS = { sent: "Waiting", accepted: "Accepted", declined: "Declined", expired: "Expired" };
@@ -1562,6 +1574,89 @@ function drawStudents(admin) {
       await loadStudents(r.email_errors?.length ? `Invite renewed for 30 days, but the email didn't send: ${r.email_errors[0]}` : "Sent again; the invite is open for 30 more days.");
     } catch (e) { studentsMsg(e.message, true); }
   }));
+}
+
+/** The assignment's latest finished test (sent by the phone), or undefined. */
+function lastTest(a, tests) {
+  if (!a) return undefined;
+  return tests.filter((t) => t.assignment_id === a.id && t.status !== "in_progress").sort((x, y) => (x.started_at < y.started_at ? 1 : -1))[0];
+}
+
+/** The coach report made for a test (cue_coach_report.py --test-id / --pending files it with summary.test_id). */
+async function reportForTest(testId) {
+  if (mock) return null;
+  const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path")
+    .eq("kind", "coach").eq("summary->>test_id", testId).order("created_at", { ascending: false }).limit(1);
+  if (error) throw new Error(`reports: ${error.message}`);
+  return data?.[0] || null;
+}
+
+/**
+ * Reviewing a test (coaching step 6, 2026-11-13): the test's numbers, its Cue Coach Report (the
+ * coach-test report, made on the Mac from the cloud test), and the coach's answer: set the next
+ * target (which marks it reviewed), or just mark it reviewed, or pass the drill; plus a comment the
+ * student sees. The suggested goal is the cloud's rule: this score + the drill's improvement, at most the best.
+ */
+async function openReview({ p, a }) {
+  const box = $("review-box"), name = nameOf(studentsState.people, p.id), t = lastTest(a, studentsState.tests);
+  if (!t) return;
+  $("assign-box").hidden = true;
+  const max = t.max_score ?? testMax(a), d = drillOf(a);
+  const improvement = a.improvement ?? d?.improvement ?? 0.2;
+  const suggested = t.score == null ? null : Math.min(max ?? Infinity, Math.ceil(t.score * (1 + improvement) - 1e-9));
+  const yes = (v) => (v == null ? "not judged" : v ? "met" : "missed");
+  const due = new Date(Date.now() + 7 * 864e5), dueIso = isoDay(due);
+  const focus = a.focus_metric ? esc(a.focus_metric.replace(/_/g, " ")) : null;
+  box.innerHTML = `<b>${esc(name)}: ${t.kind === "baseline" ? "baseline test" : "test"} on ${shortDay(t.started_at)}</b>
+    <div>${drillText(a)} · score <b>${fmt(t.score, 0)}${max ? ` of ${max}` : ""}</b> · ${t.sets_done} of ${t.sets_planned} sets${t.status === "incomplete" ? " (<b>incomplete</b>: not finished that day)" : ""}</div>
+    ${t.kind === "weekly" ? `<div class="small">Score goal ${yes(t.score_met)} · band ${yes(t.metric_met)} · pass rule ${yes(t.rule_met)}${t.pass_check ? " · <b>met on this test and the one before: ready to pass?</b>" : ""}</div>` : ""}
+    <div id="rv-report" class="small">Looking for its report…</div>
+    <div class="row">
+      <label>Next score goal <input id="rv-goal" type="number" min="0" ${max ? `max="${max}"` : ""} step="1" value="${suggested ?? ""}" style="width:110px"></label>
+      <label>Next test due <input id="rv-due" type="date" value="${a.due_date && a.due_date > isoDay(new Date()) ? a.due_date : dueIso}"></label>
+      ${focus ? `<label>${focus} band (optional) <span style="display:flex;gap:6px"><input id="rv-lo" type="number" step="any" placeholder="low" value="${a.band_low ?? ""}" style="width:90px"><input id="rv-hi" type="number" step="any" placeholder="high" value="${a.band_high ?? ""}" style="width:90px"></span></label>
+      <label>Inside the band <select id="rv-mgoal">${[6, 7, 8, 9, 10].map((n) => `<option value="${n / 10}" ${Math.round((a.metric_goal ?? 0.8) * 10) === n ? "selected" : ""}>${n} of 10 strokes</option>`).join("")}</select></label>` : ""}
+    </div>
+    <div class="small">${suggested != null ? `Suggested goal ${suggested}: this score + ${Math.round(improvement * 100)}%${max ? `, at most ${max}` : ""}. ` : ""}${focus ? "With a band, passing needs the score goal and the band; without one, the score goal alone." : "Passing needs the score goal."}</div>
+    <label>Comment for ${esc(name)} (optional) <textarea id="rv-comment" rows="2" maxlength="5000" placeholder="What you saw and what to work on"></textarea></label>
+    <div class="row">
+      <button class="primary" id="rv-target">${a.target_set_at ? "Set next target" : "Set the target"}</button>
+      ${a.target_set_at && !t.reviewed_at ? `<button id="rv-keep">Reviewed: keep the target</button>` : ""}
+      ${t.kind === "weekly" ? `<button id="rv-pass">Passed: drill done</button>` : ""}
+      <button id="rv-cancel">Close</button>
+    </div>`;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("rv-cancel").onclick = () => (box.hidden = true);
+  reportForTest(t.id).then((r) => {
+    if (!$("rv-report")) return;
+    $("rv-report").innerHTML = r ? `<button class="link" id="rv-open"><b>Open the Cue Coach Report</b></button> <span class="small">(${esc(r.title)})</span>`
+      : "Its Cue Coach Report isn't made yet (the Mac makes it: python3 cue_coach_report.py --pending).";
+    $("rv-open")?.addEventListener("click", () => { reportBack = () => { show("who", "students"); $("title").textContent = "Students"; }; showReport(r); });
+  }).catch((e) => { if ($("rv-report")) $("rv-report").textContent = e.message; });
+  const comment = async () => {
+    const body = $("rv-comment").value.trim();
+    if (body) await coachingCall({ action: "comment", assignment_id: a.id, test_id: t.id, body });
+  };
+  const act = async (button, work, done) => {
+    button.disabled = true;
+    try { await work(); await comment(); await loadStudents(done); } catch (e) { studentsMsg(e.message, true); button.disabled = false; }
+  };
+  $("rv-target").onclick = () => {
+    const goal = Number($("rv-goal").value), lo = $("rv-lo")?.value, hi = $("rv-hi")?.value;
+    if ($("rv-goal").value === "" || !(goal >= 0) || (max && goal > max)) return studentsMsg(`The score goal is 0 to ${max ?? "the best score"}.`, true);
+    if ((lo === "") !== (hi === "") ) return studentsMsg("Give both ends of the band, or neither.", true);
+    const band = lo ? { band_low: Number(lo), band_high: Number(hi), metric_goal: Number($("rv-mgoal").value) } : {};
+    if (lo && band.band_low > band.band_high) return studentsMsg("The band's low end is above its high end.", true);
+    act($("rv-target"), () => coachingCall({ action: "set_target", assignment_id: a.id, score_goal: goal, due_date: $("rv-due").value,
+      pass_rule: lo ? "both" : "score", ...band }), `Target set for ${name}: score ${goal}, next test ${shortDay($("rv-due").value)}. They've been emailed.`);
+  };
+  $("rv-keep")?.addEventListener("click", () => act($("rv-keep"), () => coachingCall({ action: "review", test_id: t.id }), `Test marked reviewed; ${name}'s target stays.`));
+  $("rv-pass")?.addEventListener("click", () => {
+    if (!confirm(`Mark ${d?.name || "this drill"} as passed for ${name}? Then assign their next drill.`)) return;
+    act($("rv-pass"), async () => { await coachingCall({ action: "review", test_id: t.id }); await coachingCall({ action: "pass", assignment_id: a.id }); },
+      `${d?.name || "Drill"} passed. Assign ${name}'s next drill with New drill…`);
+  });
 }
 
 /** A student's training log, from the Students page (the player list above already has them). */
