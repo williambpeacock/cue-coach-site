@@ -270,7 +270,12 @@ tr.detail td { background: var(--panel-2); }
       <input id="share-out" readonly><button id="share-copy">Copy</button>
     </div>
     <div class="small" id="share-msg">Anyone with a share link can open this report for 90 days, without signing in.</div>
-    <iframe id="report-frame" title="Report" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>
+    <iframe id="report-frame" title="Report" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+    <!-- A test's coach report (2026-11-13): the report's three Coach feedback boxes are saved and emailed to the student. -->
+    <div class="share-row" id="feedback-bar" hidden>
+      <button class="primary" id="feedback-send">Save and email to the student</button>
+      <span class="small" id="feedback-msg"></span>
+    </div>
   </section>
 
   <section class="panel" id="people" hidden>
@@ -919,7 +924,7 @@ let openReport = null;
 async function loadReports() {
   $("reports-panel").hidden = true;
   if (mock || !playerIds[playerCode]) return;
-  const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path")
+  const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path, summary")
     .eq("owner_id", playerIds[playerCode]).order("created_at", { ascending: false });
   if (error || !data?.length) return;
   $("reports").innerHTML = "<tr><th style='text-align:left'>Report</th><th>Shots</th><th>Made</th><th>Made %</th><th>Kind</th></tr>" +
@@ -935,10 +940,66 @@ async function showReport(r) {
   $("report-title").textContent = r.title;
   $("share-out-row").hidden = true; $("share-email").value = "";
   $("share-msg").textContent = "Anyone with a share link can open this report for 90 days, without signing in.";
+  const loaded = new Promise((done) => $("report-frame").addEventListener("load", done, { once: true }));
   $("report-frame").srcdoc = (await data.text()).replace(/<head>/i, '<head><base target="_blank">');
+  setupFeedback(r, loaded);
   show("who", "report-view");
   status("");
 }
+// ---- The coach's feedback on a test (2026-11-13). A test's coach report (cue_coach_report.py --test-id,
+// summary.test_id) ends with three boxes: what improved, what to work on, next drill and target.
+// "Save and email" sends them to the coaching function (action feedback): saved on the test as a
+// comment, the test marked reviewed, and emailed to the student. The boxes open filled with the
+// last feedback saved. The frame allows same-origin (no scripts) so the page can read the boxes.
+const FEEDBACK_BOXES = [["praise", "improved", "What improved: "], ["fix", "work_on", "What to work on: "], ["next", "next", "Next drill and target: "]];
+let feedbackFor = null;  // {test, student} of the report on screen
+async function setupFeedback(r, loaded) {
+  feedbackFor = null;
+  $("feedback-bar").hidden = true; $("feedback-msg").textContent = ""; $("feedback-msg").className = "small";
+  const testId = r.summary?.test_id;
+  if (r.kind !== "coach" || !testId || !["coach", "admin"].includes(me?.role)) return;
+  try {
+    const [test] = await ctable("tests", (q) => q.eq("id", testId), (t) => t.id === testId);
+    if (!test) return;
+    const [student] = await ctable("profiles", (q) => q.eq("id", test.student_id), (p) => p.id === test.student_id);
+    const comments = await ctable("coach_comments", (q) => q.eq("test_id", testId).neq("author_id", test.student_id).order("created_at", { ascending: false }),
+      (c) => c.test_id === testId && c.author_id !== test.student_id);
+    const last = comments.find((c) => FEEDBACK_BOXES.some(([, , label]) => c.body.startsWith(label)));
+    feedbackFor = { test, student };
+    const first = (student?.display_name || student?.player_code || "the student").split(" ")[0];
+    $("feedback-send").textContent = `Save and email to ${first}`;
+    $("feedback-send").disabled = false;
+    $("feedback-bar").hidden = false;
+    if (last) $("feedback-msg").textContent = `Last sent ${when(last.created_at)}.`;
+    const fill = () => {
+      const doc = $("report-frame").contentDocument;
+      if (!doc || !last) return;
+      for (const part of last.body.split("\n\n")) {
+        const box = FEEDBACK_BOXES.find(([, , label]) => part.startsWith(label));
+        const el = box && doc.getElementById(box[0]);
+        if (el && !el.value) el.value = part.slice(box[2].length);
+      }
+    };
+    if (last) { await loaded; fill(); }
+  } catch (e) { $("feedback-msg").textContent = e.message; }
+}
+$("feedback-send").onclick = async () => {
+  if (!feedbackFor) return;
+  const doc = $("report-frame").contentDocument;
+  const say = (text, bad) => { $("feedback-msg").textContent = text; $("feedback-msg").className = bad ? "err" : "small"; };
+  if (!doc) return say("Couldn't read the report's boxes.", true);
+  const args = Object.fromEntries(FEEDBACK_BOXES.map(([id, key]) => [key, (doc.getElementById(id)?.value || "").trim()]));
+  if (!args.improved && !args.work_on && !args.next) return say("Type something in at least one of the Coach feedback boxes first.", true);
+  const name = feedbackFor.student?.display_name || "the student";
+  $("feedback-send").disabled = true; say("Saving…");
+  try {
+    const r = await coachingCall({ action: "feedback", test_id: feedbackFor.test.id, ...args });
+    say(r.email_errors?.length ? `Saved, but the email didn't send: ${r.email_errors[0]}`
+      : r.emailed ? `Saved and emailed to ${name}.` : `Saved. ${name} has no email address on file, so nothing was emailed.`, Boolean(r.email_errors?.length));
+  } catch (e) { say(e.message, true); }
+  $("feedback-send").disabled = false;
+};
+
 let reportBack = null;  // where Back goes (the Students page when the report was opened from a test)
 $("report-back").onclick = () => { const back = reportBack; reportBack = null; back ? back() : show("who", "home"); };
 $("share-make").onclick = async () => {
@@ -1338,6 +1399,10 @@ function mockCoaching(b) {
     Object.assign(a, { score_goal: b.score_goal, band_low: b.band_low ?? null, band_high: b.band_high ?? null, pass_rule: b.pass_rule || a.pass_rule,
       metric_goal: b.metric_goal ?? a.metric_goal ?? 0.8, due_date: b.due_date, target_set_at: now });
     mockC.tests.forEach((t) => { if (t.assignment_id === a.id && t.status !== "in_progress" && !t.reviewed_at) t.reviewed_at = now; });
+  } else if (b.action === "feedback") {
+    const t = mockC.tests.find((x) => x.id === b.test_id); t.reviewed_at ||= now;
+    const body = [["What improved: ", b.improved], ["What to work on: ", b.work_on], ["Next drill and target: ", b.next]].filter(([, v]) => v).map(([l, v]) => l + v).join("\n\n");
+    (mockC.coach_comments ||= []).push({ id: `m-c${Date.now()}`, test_id: t.id, student_id: t.student_id, assignment_id: t.assignment_id, author_id: me.id, body, created_at: now });
   } else if (b.action === "review") {
     const t = mockC.tests.find((x) => x.id === b.test_id); t.reviewed_at ||= now;
   } else if (b.action === "pass" || b.action === "close") {
@@ -1585,7 +1650,7 @@ function lastTest(a, tests) {
 /** The coach report made for a test (cue_coach_report.py --test-id / --pending files it with summary.test_id). */
 async function reportForTest(testId) {
   if (mock) return null;
-  const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path")
+  const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path, summary")
     .eq("kind", "coach").eq("summary->>test_id", testId).order("created_at", { ascending: false }).limit(1);
   if (error) throw new Error(`reports: ${error.message}`);
   return data?.[0] || null;
