@@ -1647,7 +1647,7 @@ function lastTest(a, tests) {
   return tests.filter((t) => t.assignment_id === a.id && t.status !== "in_progress").sort((x, y) => (x.started_at < y.started_at ? 1 : -1))[0];
 }
 
-/** The coach report made for a test (cue_coach_report.py --test-id / --pending files it with summary.test_id). */
+/** The coach report made for a test (the coaching function files it with summary.test_id). */
 async function reportForTest(testId) {
   if (mock) return null;
   const { data, error } = await db.from("reports").select("id, kind, title, shots, made, created_at, storage_path, summary")
@@ -1658,7 +1658,7 @@ async function reportForTest(testId) {
 
 /**
  * Reviewing a test (coaching step 6, 2026-11-13): the test's numbers, its Cue Coach Report (the
- * coach-test report, made on the Mac from the cloud test), and the coach's answer: set the next
+ * coach-test report, made in the cloud: _shared/test_report.ts, the same page as cue_coach_report.py), and the coach's answer: set the next
  * target (which marks it reviewed), or just mark it reviewed, or pass the drill; plus a comment the
  * student sees. The suggested goal is the cloud's rule: this score + the drill's improvement, at most the best.
  */
@@ -1693,12 +1693,18 @@ async function openReview({ p, a }) {
   box.hidden = false;
   box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   $("rv-cancel").onclick = () => (box.hidden = true);
-  reportForTest(t.id).then((r) => {
-    if (!$("rv-report")) return;
-    $("rv-report").innerHTML = r ? `<button class="link" id="rv-open"><b>Open the Cue Coach Report</b></button> <span class="small">(${esc(r.title)})</span>`
-      : "Its Cue Coach Report isn't made yet (the Mac makes it: python3 cue_coach_report.py --pending).";
-    $("rv-open")?.addEventListener("click", () => { reportBack = () => { show("who", "students"); $("title").textContent = "Students"; }; showReport(r); });
-  }).catch((e) => { if ($("rv-report")) $("rv-report").textContent = e.message; });
+  // The cloud makes the report when the test comes in, and brings it up to date here if more of the
+  // test's shots or recordings have arrived since (the phone can send "finished" before them).
+  (mock ? Promise.resolve({ result: { note: "the sample data has no reports" } })
+        : coachingCall({ action: "make_report", test_id: t.id }).catch((e) => ({ error: e.message })))
+    .then(async (made) => {
+      const r = await reportForTest(t.id);
+      if (!$("rv-report")) return;
+      const why = made.error || made.result?.note || "";
+      $("rv-report").innerHTML = r ? `<button class="link" id="rv-open"><b>Open the Cue Coach Report</b></button> <span class="small">(${esc(r.title)}${made.result?.made ? "; just updated with the shots that came in" : ""})</span>`
+        : `Its Cue Coach Report couldn't be made yet${why ? `: ${esc(why)}` : ""}. It is made once the test's shots are in the cloud; open this again later.`;
+      $("rv-open")?.addEventListener("click", () => { reportBack = () => { show("who", "students"); $("title").textContent = "Students"; }; showReport(r); });
+    }).catch((e) => { if ($("rv-report")) $("rv-report").textContent = e.message; });
   const comment = async () => {
     const body = $("rv-comment").value.trim();
     if (body) await coachingCall({ action: "comment", assignment_id: a.id, test_id: t.id, body });
