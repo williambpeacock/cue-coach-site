@@ -148,7 +148,7 @@ tr.detail td { background: var(--panel-2); }
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="signout">Sign out</button>
+      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="delete-link">Delete account</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -171,6 +171,23 @@ tr.detail td { background: var(--panel-2); }
       <button class="primary" type="submit">Save password</button>
       <div id="reset-msg" class="msg"></div>
     </form>
+  </section>
+
+  <!-- Delete account (2026-11-15; docs/plans/account_deletion_plan.md): the account function sets it for 7
+       days later and signs the person out everywhere. Same words as the phones. -->
+  <section class="panel" id="deletion-banner" hidden>
+    <h2 class="err" id="deletion-when"></h2>
+    <p id="deletion-shots" class="small"></p>
+    <button class="primary" id="deletion-keep">Keep my account</button> <span id="deletion-msg" class="msg"></span>
+  </section>
+  <section class="panel" id="delete-account" hidden>
+    <h2>Delete account</h2>
+    <p>Deleting your account removes your login, your name and email, your coach links, comments, reports and settings.</p>
+    <p id="delete-shots-words">Your shots are kept without your name, email or player code, so they can't be traced back to you. They help us improve how Cue Coach measures a stroke.</p>
+    <p><label><input type="checkbox" id="delete-shots"> Delete my shots too</label></p>
+    <p class="small">You'll be signed out on every phone and on this page, and we'll email you the date. The account is deleted 7 days later. Changed your mind? Sign in before then and choose Keep my account.</p>
+    <button id="delete-go" style="color:var(--bad);border-color:var(--bad)">Delete account</button> <button class="link" id="delete-cancel">Cancel</button>
+    <div id="delete-msg" class="msg"></div>
   </section>
 
   <!-- Home (2026-11-08): a training log for the player. Log = one entry per session, newest first;
@@ -370,7 +387,7 @@ tr.detail td { background: var(--panel-2); }
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "report-view"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
@@ -421,6 +438,7 @@ async function signedIn() {
   show("who", "home");
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
+  checkDeletion();
   $("people-link").hidden = me.role !== "admin";
   $("students-link").hidden = !["admin", "coach"].includes(me.role);
   $("booth-link").hidden = !["admin", "staff"].includes(me.role);
@@ -1803,6 +1821,57 @@ $("reset-form").onsubmit = async (e) => {
   start();
 };
 $("setpw").onclick = () => show("reset");
+
+// ---- Delete account (2026-11-15): the account edge function (cloud/production/supabase/functions/account).
+const deletionDate = (t) => new Date(t).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+async function accountCall(body) {
+  if (mock) {
+    if (body.action === "request") return { ok: true, request: { due_at: new Date(Date.now() + 7 * 864e5).toISOString(), delete_shots: body.delete_shots } };
+    return { ok: true, request: null, cancelled: true };
+  }
+  const res = await callFunction("account", { method: "POST", body: JSON.stringify(body) });
+  const answer = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  if (!answer.ok) throw new Error(answer.error || `HTTP ${res.status}`);
+  return answer;
+}
+/** After sign-in: an open Delete account request shows at the top with Keep my account. */
+async function checkDeletion() {
+  try {
+    const { request } = await accountCall({ action: "status" });
+    $("deletion-banner").hidden = !request;
+    $("delete-link").hidden = !!request;
+    if (!request) return;
+    $("deletion-when").textContent = `Your account is set to be deleted on ${deletionDate(request.due_at)}. Keep it?`;
+    $("deletion-shots").textContent = request.delete_shots ? "Your shots will be deleted too." : "Your shots will be kept without your name.";
+  } catch (_) { /* no connection: asked again next time */ }
+}
+$("deletion-keep").onclick = async () => {
+  $("deletion-keep").disabled = true;
+  try {
+    await accountCall({ action: "cancel" });
+    $("deletion-banner").hidden = true; $("delete-link").hidden = false;
+    status("Your account won't be deleted.");
+  } catch (e) { $("deletion-msg").textContent = e.message; }
+  $("deletion-keep").disabled = false;
+};
+$("delete-link").onclick = () => { $("delete-msg").textContent = ""; $("delete-shots").checked = false; $("delete-shots").onchange(); show("who", "delete-account"); };
+$("delete-shots").onchange = () => {
+  const too = $("delete-shots").checked;
+  $("delete-shots-words").textContent = too ? "Your shots will be deleted too."
+    : "Your shots are kept without your name, email or player code, so they can't be traced back to you. They help us improve how Cue Coach measures a stroke.";
+  $("delete-go").textContent = too ? "Delete account and shots" : "Delete account";
+};
+$("delete-cancel").onclick = () => { show("who", "home"); };
+$("delete-go").onclick = async () => {
+  if (!confirm("Delete your Cue Coach account? You'll be signed out everywhere now, and the account is deleted in 7 days.")) return;
+  $("delete-go").disabled = true; $("delete-msg").textContent = "";
+  try {
+    const { request } = await accountCall({ action: "request", delete_shots: $("delete-shots").checked });
+    const note = `Your account will be deleted on ${deletionDate(request.due_at)}. We've emailed you. Sign in before then to keep it.`;
+    if (mock) { $("delete-msg").textContent = `mock: ${note}`; $("delete-go").disabled = false; return; }
+    await signOutHere(note);
+  } catch (e) { $("delete-msg").textContent = e.message; $("delete-go").disabled = false; }
+};
 // Home (2026-11-09): back to the home screen from any page; staff's home is Leads.
 $("home-link").onclick = () => (me?.role === "staff" ? loadLeads() : (show("who", "home"), loadPlayer()));
 $("signout").onclick = () => signOutHere();
