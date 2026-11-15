@@ -168,6 +168,9 @@ tr.detail td { background: var(--panel-2); }
     <h2>Choose a new password</h2>
     <form id="reset-form">
       <span class="pw"><input id="new-password" type="password" placeholder="New password" autocomplete="new-password" minlength="8" required><button type="button" class="eye" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg></button></span>
+      <!-- Age check (Billy 2026-11-15): asked until the account has a 13-or-over consent; every
+           invite (Billy's or a coach's) lands here first. Recorded in consents (age_13_plus). -->
+      <p id="age-row" hidden><label><input type="checkbox" id="age13"> I'm 13 or older.</label></p>
       <button class="primary" type="submit">Save password</button>
       <div id="reset-msg" class="msg"></div>
     </form>
@@ -421,9 +424,9 @@ async function start() {
   if (window.CUE_CONFIG_MISSING || !window.CUE_CONFIG) return status("No config.js: copy config.example.js to config.js and fill it in (or add ?mock=1).", true);
   const recovering = /type=recovery/.test(location.hash + location.search);  // read before the library clears it
   db = supabase.createClient(CUE_CONFIG.SUPABASE_URL, CUE_CONFIG.SUPABASE_PUBLISHABLE_KEY);
-  db.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") show("reset"); });
+  db.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") showReset(); });
   const { data: { session } } = await db.auth.getSession();
-  if (recovering && session) return show("reset");
+  if (recovering && session) return showReset();
   if (!session) {
     try { $("signin-msg").textContent = sessionStorage.getItem("signin-note") || ""; sessionStorage.removeItem("signin-note"); } catch (_) {}
     return show("signin");
@@ -1813,14 +1816,31 @@ $("forgot").onclick = async () => {
   const { error } = await db.auth.resetPasswordForEmail($("email").value, { redirectTo: location.origin + location.pathname });
   $("signin-msg").textContent = error ? error.message : "If that email has an account, a reset link is on its way.";
 };
+// The password page; the age box shows when this login has no 13-or-over answer yet.
+async function showReset() {
+  show("reset");
+  $("age-row").hidden = true; $("age13").required = false; $("age13").checked = false;
+  let answered = false;
+  if (!mock) {
+    const { data } = await db.from("current_consents").select("granted").eq("kind", "age_13_plus").eq("granted", true).limit(1);
+    answered = !!data?.length;
+  }
+  $("age-row").hidden = answered; $("age13").required = !answered;
+}
 $("reset-form").onsubmit = async (e) => {
   e.preventDefault();
+  if (mock) return ($("reset-msg").textContent = `(mock) would save the password${$("age-row").hidden ? "" : " and record 13 or older"}.`);
   const { error } = await db.auth.updateUser({ password: $("new-password").value });
   if (error) return ($("reset-msg").textContent = error.message);
+  if (!$("age-row").hidden) {
+    const { data: { user } } = await db.auth.getUser();
+    const { error: e2 } = await db.from("consents").insert({ user_id: user.id, kind: "age_13_plus", version: "1", granted: true, source: "web" });
+    if (e2) return ($("reset-msg").textContent = `Password saved, but your age answer wasn't: ${e2.message}. Try again or email team@cue-coach.com.`);
+  }
   history.replaceState(null, "", location.pathname);
   start();
 };
-$("setpw").onclick = () => show("reset");
+$("setpw").onclick = () => showReset();
 
 // ---- Delete account (2026-11-15): the account edge function (cloud/production/supabase/functions/account).
 const deletionDate = (t) => new Date(t).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
