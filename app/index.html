@@ -139,6 +139,21 @@ tr.detail td { background: var(--panel-2); }
 .invite-card { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .invite-card .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
 .coach-lines { display: flex; flex-direction: column; gap: 4px; }
+/* Admin Dashboard (2026-11-15): player engagement, admins only (dashboard.js). */
+.dash { display: flex; flex-direction: column; gap: 18px; }
+.dash-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.dash-controls label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.dash-controls .grow { flex: 1; }
+.dash-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.dash-cards .sub { font-size: 12px; }
+.chart.tall { height: 240px; }
+.chart-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.heat-wrap { overflow-x: auto; }
+.heat { display: grid; grid-template-columns: 34px repeat(24, minmax(14px, 1fr)); gap: 2px; min-width: 420px; font-size: 10px; color: var(--muted); }
+.heat .hc { height: 16px; border-radius: 3px; } .heat .hd { font-size: 11px; line-height: 16px; } .heat .hh { white-space: nowrap; }
+#dash-table td, #dash-table th { font-size: 12px; }
+#dash-players td:first-child, #dash-quiet td:first-child { white-space: normal; }
+details summary { cursor: pointer; color: var(--accent); }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -148,7 +163,7 @@ tr.detail td { background: var(--panel-2); }
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="delete-link">Delete account</button> <button class="link" id="signout">Sign out</button>
+      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="dash-link" hidden>Dashboard</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="delete-link">Delete account</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -371,11 +386,98 @@ tr.detail td { background: var(--panel-2); }
     <div class="table-wrap"><table id="stock-table"></table></div>
   </section>
 
+  <!-- Admin Dashboard (2026-11-15): player engagement, admins only. Numbers from admin_dashboard(), drawn by dashboard.js. -->
+  <div class="dash" id="dash" hidden>
+    <section class="panel">
+      <div><button class="link" id="dash-back">← Strokes</button></div>
+      <div class="dash-controls">
+        <div class="seg" id="dash-range" role="group" aria-label="Range"><button data-v="7">7 days</button><button data-v="30">30 days</button><button data-v="90">90 days</button><button data-v="365">1 year</button></div>
+        <div class="seg" id="dash-group" role="group" aria-label="Group by"><button data-v="day">Daily</button><button data-v="week">Weekly</button><button data-v="month">Monthly</button></div>
+        <label title="Admins, staff, App Review, Bridge and Unknown player"><input type="checkbox" id="dash-team"> Include team</label>
+        <span class="grow"></span>
+        <button class="link" id="dash-refresh">Refresh</button>
+      </div>
+      <p class="small" id="dash-note"></p>
+      <div class="cards dash-cards" id="dash-cards"></div>
+    </section>
+
+    <section class="panel">
+      <div class="chart-head"><h2>Shots by type</h2><span class="small">measured shots; a drill or test shot counts once, as drill or test</span></div>
+      <div class="legend" id="dl-shots"></div>
+      <div class="chart tall"><canvas id="dc-shots" aria-label="Shots by type per period" role="img"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <h2>Players</h2>
+      <div class="charts">
+        <div><div class="label">Active players</div><div class="legend" id="dl-players"></div><div class="chart"><canvas id="dc-players" aria-label="Active players per period" role="img"></canvas></div></div>
+        <div><div class="label">Shots per active player</div><div class="chart"><canvas id="dc-perplayer" aria-label="Shots per active player" role="img"></canvas></div></div>
+        <div><div class="label">Practice minutes</div><div class="chart"><canvas id="dc-minutes" aria-label="Practice minutes per period" role="img"></canvas></div></div>
+      </div>
+      <p class="small">Practice minutes: the time between a player's shots, counting gaps of 10 minutes or less, plus a minute for the first shot after a break.</p>
+      <div class="table-wrap"><table id="dash-players"></table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Gone quiet</h2>
+      <p class="small">Players (not the team) with no shot in the last 7 days, most recent first: worth a check-in from you or their coach.</p>
+      <div class="table-wrap"><table id="dash-quiet"></table></div>
+      <p class="small" id="dash-never"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Drills and coaching</h2>
+      <div class="charts">
+        <div><div class="label">Drill sets</div><div class="chart"><canvas id="dc-sets" aria-label="Drill sets per period" role="img"></canvas></div></div>
+        <div><div class="label">Drill shots made</div><div class="chart"><canvas id="dc-made" aria-label="Percent of drill shots made" role="img"></canvas></div></div>
+      </div>
+      <div class="table-wrap"><table id="dash-coaching"></table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Shot types</h2>
+      <p class="small">The shot type picked on the app's Developer screen: shots made on purpose to test the analysis. Everything else is Normal.</p>
+      <div id="dash-intents"></div>
+    </section>
+
+    <section class="panel">
+      <h2>When they practise</h2>
+      <p class="small">Shots by weekday and hour, in each player's own time zone. Darker blue is fewer, lighter is more; hover for the count.</p>
+      <div class="heat-wrap" id="dash-heat"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Data quality</h2>
+      <div class="legend" id="dl-quality"></div>
+      <div class="chart tall"><canvas id="dc-quality" aria-label="Uploads by how the engine did" role="img"></canvas></div>
+      <p class="small" id="dash-quality-note"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Phones and app versions</h2>
+      <div class="cards" id="dash-phones"></div>
+      <div class="table-wrap"><table id="dash-versions"></table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Leads</h2>
+      <div class="cards" id="dash-leads"></div>
+    </section>
+
+    <section class="panel">
+      <details><summary>Every number by period</summary>
+        <p><button class="link" id="dash-csv">Download CSV</button></p>
+        <div class="table-wrap"><table id="dash-table"></table></div>
+      </details>
+    </section>
+  </div>
+
   <div id="status" class="msg"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="dashboard.js" defer></script>
 <script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
 <script>
   // The eye beside a password box shows or hides what was typed.
@@ -390,7 +492,7 @@ tr.detail td { background: var(--panel-2); }
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "dash", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
@@ -443,6 +545,7 @@ async function signedIn() {
   $("signout").hidden = mock; $("setpw").hidden = mock;
   checkDeletion();
   $("people-link").hidden = me.role !== "admin";
+  $("dash-link").hidden = me.role !== "admin";  // admin_dashboard refuses everyone else too
   $("students-link").hidden = !["admin", "coach"].includes(me.role);
   $("booth-link").hidden = !["admin", "staff"].includes(me.role);
   $("leads-link").hidden = !["admin", "staff"].includes(me.role);
@@ -487,7 +590,7 @@ async function loadPlayer() {
     loadFargo();
     loadScoreboard();
     loadPayoff();
-    if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden) show("who", "home");  // an admin page opened meanwhile stays open
+    if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden && $("dash").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
