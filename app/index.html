@@ -550,11 +550,15 @@ async function signedIn() {
   $("booth-link").hidden = !["admin", "staff"].includes(me.role);
   $("leads-link").hidden = !["admin", "staff"].includes(me.role);
   $("stock-link").hidden = !["admin", "staff"].includes(me.role);
-  // Staff (2026-11-05) see Leads and Inventory (2026-11-08) and nothing else: no strokes, no People page.
-  if (me.role === "staff") { $("leads-back").hidden = true; $("stock-back").hidden = true; return loadLeads(); }
-  // Coaches and admin pick a player; a player sees only themself.
+  // Staff (2026-11-05) see Leads and Inventory (2026-11-08), no People page. A staff member who is
+  // also a player (has a player code, or a coach's invite or link waiting) gets their own training
+  // log too, like a player (2026-11-16: Katherine, KS01, couldn't see Billy's invite). Others: Leads.
+  const leadsOnly = me.role === "staff" && !(await staffPlays());
+  $("leads-back").hidden = leadsOnly; $("stock-back").hidden = leadsOnly;
+  if (leadsOnly) return loadLeads();
+  // Coaches and admin pick a player; a player (or staff) sees only themself.
   let players = [me];
-  if (me.role !== "player") {
+  if (!["player", "staff"].includes(me.role)) {
     players = mock ? await fromMock("profiles") : (await db.from("profiles").select("id, player_code, display_name").not("player_code", "is", null).order("player_code")).data || [];
     if (me.role === "coach" && !mock) {
       const { data: links } = await db.from("coach_links").select("student_id").eq("coach_id", me.id).eq("active", true);
@@ -566,12 +570,30 @@ async function signedIn() {
   }
   playerIds = Object.fromEntries(players.map((p) => [p.player_code, p.id]));
   playerCode = (players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
-  if (!playerCode) return status("No players to show yet.");
-  $("player").value = playerCode;
+  if (playerCode) $("player").value = playerCode;
   loadPlayer();
 }
 
+/** Staff who also play: a player code, or a coach's invite or link waiting for them. */
+async function staffPlays() {
+  if (me.player_code) return true;
+  try {
+    const [invites, links] = await Promise.all([
+      ctable("coach_invites", (q) => q.eq("student_id", me.id).eq("status", "sent"), (i) => i.student_id === me.id && i.status === "sent"),
+      ctable("coach_links", (q) => q.eq("student_id", me.id).eq("active", true), (l) => l.student_id === me.id && l.active),
+    ]);
+    return invites.length + links.length > 0;
+  } catch (_) { return false; }
+}
+
 async function loadPlayer() {
+  // No player code yet (a new login, made by a coach's invite): nothing to show but the coaching
+  // panel, where the invite is accepted (accepting gives a code). Before 2026-11-16 the page stopped
+  // at "No players to show yet" and the invite never appeared.
+  if (!playerCode) {
+    status(me.role === "player" || me.role === "staff" ? "No shots yet. If a coach invited you, accept it above." : "No players to show yet.");
+    return loadMyCoaching();
+  }
   status("Loading…");
   try {
     const [sessions, weeks] = await Promise.all([rows("player_sessions", { player_code: playerCode }), rows("player_weeks", { player_code: playerCode })]);
@@ -1574,7 +1596,7 @@ const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 async function loadFargo() {
   const panel = $("fargo-panel"), code = playerCode;
   const id = playerIds[playerCode] || (playerCode === me?.player_code ? me.id : null);
-  panel.hidden = !id || me.role === "staff";
+  panel.hidden = !id;
   if (panel.hidden) return;
   $("fargo-form").hidden = true; $("fargo-update").hidden = false; $("fargo-msg").textContent = "";
   let entries;
@@ -1626,7 +1648,7 @@ $("fargo-form").addEventListener("submit", async (ev) => {
 async function loadMyCoaching() {
   const panel = $("coach-panel");
   panel.hidden = true;
-  if (!me || me.role === "staff" || (me.player_code && playerCode !== me.player_code)) return;
+  if (!me || (me.role === "staff" && !(await staffPlays())) || (me.player_code && playerCode !== me.player_code)) return;
   try {
     const [invites, links, assignments] = await Promise.all([
       ctable("coach_invites", (q) => q.eq("status", "sent").neq("coach_id", me.id), (i) => i.status === "sent" && i.coach_id !== me.id && i.student_id === me.id),
@@ -1995,8 +2017,9 @@ $("delete-go").onclick = async () => {
     await signOutHere(note);
   } catch (e) { $("delete-msg").textContent = e.message; $("delete-go").disabled = false; }
 };
-// Home (2026-11-09): back to the home screen from any page; staff's home is Leads.
-$("home-link").onclick = () => (me?.role === "staff" ? loadLeads() : (show("who", "home"), loadPlayer()));
+// Home (2026-11-09): back to the home screen from any page; staff's home is Leads, unless they also
+// play (2026-11-16): then it's their training log.
+$("home-link").onclick = async () => (me?.role === "staff" && !(await staffPlays()) ? loadLeads() : (show("who", "home"), loadPlayer()));
 $("signout").onclick = () => signOutHere();
 
 // ---- Login upkeep (2026-11-08). A login can be ended elsewhere (the phone's Sign out used to end
