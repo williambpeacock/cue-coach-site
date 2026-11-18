@@ -139,6 +139,23 @@ tr.detail td { background: var(--panel-2); }
 .invite-card { border: 1px solid var(--accent); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .invite-card .buttons { display: flex; gap: 10px; flex-wrap: wrap; }
 .coach-lines { display: flex; flex-direction: column; gap: 4px; }
+/* Feedback (2026-11-17): send, your own reports, and the admins' list (feedback.js). */
+#fb-form { max-width: 560px; }
+#fb-form textarea, #fb-add textarea, .fb-controls textarea { font: inherit; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; width: 100%; resize: vertical; }
+#fb-add { max-width: 560px; }
+.fb-text { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
+td.fb-text { white-space: normal; min-width: 180px; }
+#fb-mine th, #fb-mine td { text-align: left; }
+.fb-card { background: var(--panel-2); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; border-left: 3px solid var(--line); }
+.fb-card.fb-new { border-left-color: var(--accent); } .fb-card.fb-looking { border-left-color: #3987e5; } .fb-card.fb-fixed { border-left-color: #4d7c4d; }
+.fb-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.fb-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+.fb-controls label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.fb-controls label:has(input[type=checkbox]) { flex-direction: row; align-items: center; gap: 6px; }
+.fb-controls input, .fb-controls select { padding: 5px 8px; font-size: 13px; background: var(--panel); }
+.fb-controls .grow { flex: 1; min-width: 160px; } .fb-controls .wide { flex-basis: 100%; }
+.fb-controls .grow input { width: 100%; }
+#fb-list { display: flex; flex-direction: column; gap: 10px; }
 /* Admin Dashboard (2026-11-15): player engagement, admins only (dashboard.js). */
 .dash { display: flex; flex-direction: column; gap: 18px; }
 .dash-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -163,7 +180,7 @@ details summary { cursor: pointer; color: var(--accent); }
     <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="dash-link" hidden>Dashboard</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="setpw">Set password</button> <button class="link" id="delete-link">Delete account</button> <button class="link" id="signout">Sign out</button>
+      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="dash-link" hidden>Dashboard</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="feedback-link">Feedback</button> <button class="link" id="setpw">Set password</button> <button class="link" id="delete-link">Delete account</button> <button class="link" id="signout">Sign out</button>
     </div>
   </header>
 
@@ -472,12 +489,56 @@ details summary { cursor: pointer; color: var(--accent); }
     </section>
   </div>
 
+  <!-- Feedback (2026-11-17, docs/plans/feedback_plan.md): everyone sends; admins sort and answer (feedback.js). -->
+  <section class="panel" id="feedback" hidden>
+    <div><button class="link" id="fb-back">← Strokes</button></div>
+    <h2>Send feedback</h2>
+    <p class="small">Ideas, problems, anything confusing, anything you like: it all goes straight to the Cue Coach team, and we read every one.
+      Something wrong with a particular shot? Use <b>This shot looks wrong</b> on the shot in the app, so we get the shot too.</p>
+    <form id="fb-form">
+      <select id="fb-kind" aria-label="What kind of feedback"></select>
+      <textarea id="fb-text" rows="5" maxlength="5000" placeholder="Tell us about it. For an improvement: what would you change, and how would it help you?"></textarea>
+      <label class="small">Add a screenshot (optional) <input type="file" id="fb-shot" accept="image/jpeg,image/png,image/webp"></label>
+      <span class="small" id="fb-shot-note"></span>
+      <button class="primary" type="submit" id="fb-send">Send</button>
+      <div id="fb-msg" class="msg"></div>
+    </form>
+    <div id="fb-mine-wrap" hidden>
+      <h2>What you've sent</h2>
+      <div class="table-wrap"><table id="fb-mine"></table></div>
+    </div>
+    <div id="fb-admin" hidden style="display:flex;flex-direction:column;gap:12px">
+      <h2>Every report (admins)</h2>
+      <p class="small">Changes save as you make them. Setting <i>Fixed in</i> marks it fixed; a <i>Duplicate of</i> number marks it a duplicate.</p>
+      <div class="small" id="fb-counts"></div>
+      <div class="filters">
+        <input type="search" id="fb-f-search" placeholder="Search words, player, shot, phone, #" aria-label="Search feedback">
+        <select id="fb-f-status" aria-label="Status"></select>
+        <select id="fb-f-kind" aria-label="Kind"></select>
+      </div>
+      <div id="fb-list"></div>
+      <details>
+        <summary>Add a report by hand (from email, TestFlight or Google Play)</summary>
+        <form id="fb-add">
+          <select id="fb-a-source" aria-label="Where it came from"><option value="email">Email</option><option value="testflight">TestFlight</option><option value="play">Google Play</option></select>
+          <select id="fb-a-who" aria-label="Who sent it"></select>
+          <span id="fb-a-email-wrap"><input id="fb-a-email" type="email" placeholder="Their email (optional)" style="width:100%"></span>
+          <select id="fb-a-kind" aria-label="Kind"></select>
+          <textarea id="fb-a-text" rows="4" placeholder="What they said"></textarea>
+          <button type="submit">Add</button>
+          <div id="fb-a-msg" class="msg"></div>
+        </form>
+      </details>
+    </div>
+  </section>
+
   <div id="status" class="msg"></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="dashboard.js" defer></script>
+<script src="feedback.js" defer></script>
 <script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
 <script>
   // The eye beside a password box shows or hides what was typed.
@@ -492,7 +553,7 @@ details summary { cursor: pointer; color: var(--accent); }
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "dash", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "dash", "feedback", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
@@ -555,7 +616,7 @@ async function signedIn() {
   // log too, like a player (2026-11-16: Katherine, KS01, couldn't see Billy's invite). Others: Leads.
   const leadsOnly = me.role === "staff" && !(await staffPlays());
   $("leads-back").hidden = leadsOnly; $("stock-back").hidden = leadsOnly;
-  if (leadsOnly) return loadLeads();
+  if (leadsOnly) return location.hash === "#feedback" ? loadFeedback() : loadLeads();
   // Coaches and admin pick a player; a player (or staff) sees only themself.
   let players = [me];
   if (!["player", "staff"].includes(me.role)) {
@@ -571,7 +632,9 @@ async function signedIn() {
   playerIds = Object.fromEntries(players.map((p) => [p.player_code, p.id]));
   playerCode = (players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
   if (playerCode) $("player").value = playerCode;
-  loadPlayer();
+  // The link in Katherine's feedback emails opens Feedback once the strokes have loaded behind it.
+  if (location.hash === "#feedback") loadPlayer().then(loadFeedback);
+  else loadPlayer();
 }
 
 /** Staff who also play: a player code, or a coach's invite or link waiting for them. */
@@ -612,7 +675,7 @@ async function loadPlayer() {
     loadFargo();
     loadScoreboard();
     loadPayoff();
-    if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden && $("dash").hidden) show("who", "home");  // an admin page opened meanwhile stays open
+    if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden && $("dash").hidden && $("feedback").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
