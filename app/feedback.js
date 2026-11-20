@@ -4,6 +4,9 @@
 // duplicate of, to-do), and add reports by hand from email, TestFlight or Google Play.
 // Sending goes through the `feedback` edge function, which saves it with the sender's login and emails
 // katherine@cue-coach.com. Sorting writes straight to the feedback table (admins only, by its rules).
+// Answers (2026-11-20): an admin writes one on a report's card; the same function saves it in
+// feedback_replies, emails it to the tester (their reply goes to katherine@) and marks the report
+// answered. The tester sees answers under "What you've sent".
 // Uses index.html's $, esc, mock, db, me, show, status, fromMock, callFunction.
 
 const FB_KINDS = {
@@ -15,7 +18,15 @@ const FB_REASONS = { speed: "The speed is off", not_a_shot: "That wasn't a shot"
   phases: "The stroke phases look wrong", other: "Something else" };
 const FB_STATUS = { new: "New", looking: "Looking into it", fixed: "Fixed", wont_fix: "Won't fix", duplicate: "Duplicate", answered: "Answered" };
 const FB_SOURCE = { android: "Android app", ios: "iPhone app", web: "web page", email: "email", testflight: "TestFlight", play: "Google Play" };
-const FB = { rows: [], people: {}, mockRows: null };
+const FB = { rows: [], people: {}, replies: [], mockRows: null, mockReplies: null };
+// Ways to start an answer (the admin edits before sending).
+const FB_STARTS = [
+  ["Thanks", "Thanks for taking the time to send this. "],
+  ["Good idea", "Thanks, that's a good idea. We've added it to our list of improvements. "],
+  ["Looking into it", "Thanks for letting us know. We're looking into it and will tell you what we find. "],
+  ["Fixed", "Thanks! This is fixed in the latest build. Update Cue Coach from TestFlight or Google Play, and let us know if you still see it. "],
+  ["More details", "Thanks for this. Could you tell us a bit more: what were you doing when it happened, and did it happen more than once? "],
+];
 const fbDate = (t) => new Date(t).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 
 $("fb-kind").innerHTML = ["idea", "bug", "confusing", "hardware", "praise", "other"]
@@ -41,11 +52,16 @@ async function loadFeedback() {
     if (mock) {
       FB.mockRows ??= await fromMock("feedback");
       FB.rows = FB.mockRows;
+      FB.mockReplies ??= await fromMock("feedback_replies");
+      FB.replies = FB.mockReplies;
       FB.people = Object.fromEntries((await fromMock("profiles")).map((p) => [p.id, p]));
     } else {
       const { data, error } = await db.from("feedback").select("*").order("created_at", { ascending: false }).limit(2000);
       if (error) throw new Error(error.message);
       FB.rows = data;
+      const { data: replies, error: rErr } = await db.from("feedback_replies").select("*").order("created_at").limit(5000);
+      if (rErr) throw new Error(rErr.message);
+      FB.replies = replies;
       if (me.role === "admin") {
         const { data: people } = await db.from("profiles").select("id, display_name, player_code");
         FB.people = Object.fromEntries((people || []).map((p) => [p.id, p]));
@@ -104,8 +120,11 @@ function drawMyFeedback() {
   $("fb-mine-wrap").hidden = !mine.length;
   $("fb-mine").innerHTML = `<tr><th>Sent</th><th>Kind</th><th>What you said</th><th>Status</th></tr>` + mine.map((r) =>
     `<tr><td>${fbDate(r.created_at)}</td><td>${esc(FB_KINDS[r.kind])}</td><td class="fb-text">${esc(firstLine(r))}</td>` +
-    `<td>${esc(FB_STATUS[r.status])}${r.status === "fixed" && r.fixed_in ? ` in ${esc(r.fixed_in)}` : ""}</td></tr>`).join("");
+    `<td>${esc(FB_STATUS[r.status])}${r.status === "fixed" && r.fixed_in ? ` in ${esc(r.fixed_in)}` : ""}</td></tr>` +
+    repliesTo(r.id).map((a) => `<tr class="fb-answer-row"><td></td><td colspan="3"><div class="fb-answer">` +
+      `<span class="small">Cue Coach answered, ${fbDate(a.created_at)}</span><div class="fb-text">${esc(a.message)}</div></div></td></tr>`).join("")).join("");
 }
+const repliesTo = (id) => FB.replies.filter((a) => a.feedback_id === id);
 const firstLine = (r) => (r.message || (r.shot_reason ? FB_REASONS[r.shot_reason] : "(a screenshot)")).split("\n")[0].slice(0, 120);
 
 // ---- Admin: every report, sorted and answered here
@@ -135,6 +154,13 @@ function drawFeedbackAdmin() {
       ${r.shot_reason ? `<div><b>${esc(FB_REASONS[r.shot_reason])}</b></div>` : ""}
       <div class="fb-text">${esc(r.message) || '<span class="small">(no message)</span>'}</div>
       ${shot || r.screenshot_path || details ? `<div class="small">${[shot, r.screenshot_path ? `<button class="link" data-shot="${esc(r.screenshot_path)}">Screenshot</button>` : "", details].filter(Boolean).join(" · ")}</div>` : ""}
+      ${repliesTo(r.id).map((a) => `<div class="fb-answer"><span class="small">Answered by ${esc(FB.people[a.author_id]?.display_name || "an admin")}, ${fbDate(a.created_at)}${
+        a.emailed_at ? ` · emailed to ${esc(a.emailed_to)}` : " · not emailed"}</span><div class="fb-text">${esc(a.message)}</div></div>`).join("")}
+      ${canEmail(r) ? `<div class="fb-reply">
+        <div class="fb-starts small">Start from: ${FB_STARTS.map(([label], i) => `<button type="button" class="link" data-start="${i}">${esc(label)}</button>`).join(" · ")}</div>
+        <textarea rows="2" maxlength="5000" placeholder="Answer ${esc(firstName(r) || "them")}: emailed to them; if they write back, it goes to katherine@"></textarea>
+        <div><button type="button" class="fb-send-reply">Send answer</button> <span class="small fb-reply-msg"></span></div>
+      </div>` : `<div class="small">No email address for this report, so it can't be answered from here.</div>`}
       <div class="fb-controls">
         <label>Status <select data-f="status">${Object.entries(FB_STATUS).map(([k, v]) => `<option value="${k}"${k === r.status ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
         <label>Fixed in <input data-f="fixed_in" value="${esc(r.fixed_in)}" placeholder="1.0 (3)" size="8"></label>
@@ -148,6 +174,45 @@ function drawFeedbackAdmin() {
   }).join("") : `<p class="small">Nothing to show with these filters.</p>`;
   $("fb-list").querySelectorAll("[data-shot]").forEach((b) => (b.onclick = () => openScreenshot(b.dataset.shot)));
   $("fb-list").querySelectorAll("[data-f]").forEach((el) => (el.onchange = () => saveFeedbackField(el)));
+  $("fb-list").querySelectorAll("[data-start]").forEach((b) => (b.onclick = () => {
+    const box = b.closest(".fb-reply").querySelector("textarea");
+    box.value = FB_STARTS[Number(b.dataset.start)][1] + box.value.trim();
+    box.focus();
+  }));
+  $("fb-list").querySelectorAll(".fb-send-reply").forEach((b) => (b.onclick = () => sendReply(b)));
+}
+
+const canEmail = (r) => !!(r.user_id ? FB.people[r.user_id] : r.contact_email);
+const firstName = (r) => (FB.people[r.user_id]?.display_name || "").trim().split(/\s+/)[0];
+
+async function sendReply(button) {
+  const card = button.closest(".fb-card"), id = Number(card.dataset.id), r = FB.rows.find((x) => x.id === id);
+  const box = card.querySelector(".fb-reply textarea"), note = card.querySelector(".fb-reply-msg");
+  const message = box.value.trim();
+  if (!message) { note.textContent = "Write the answer first."; note.className = "small err fb-reply-msg"; return; }
+  const who = FB.people[r.user_id]?.display_name || r.contact_email || "this tester";
+  if (!confirm(`Email this answer to ${who}?`)) return;
+  button.disabled = true; note.textContent = "Sending…"; note.className = "small fb-reply-msg";
+  try {
+    let answer;
+    if (mock) {
+      answer = { ok: true, id: Date.now(), emailed: true, to: r.contact_email || "player@example.com",
+                 status: ["new", "looking"].includes(r.status) ? "answered" : r.status };
+    } else {
+      const res = await callFunction("feedback", { method: "POST", body: JSON.stringify({ action: "reply", feedback_id: id, message }) });
+      answer = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+    }
+    if (!answer.ok) throw new Error(answer.error || "not sent");
+    const now = new Date().toISOString();
+    FB.replies.push({ id: answer.id, feedback_id: id, created_at: now, author_id: me.id, message,
+                      emailed_to: answer.emailed ? answer.to : null, emailed_at: answer.emailed ? now : null });
+    if (answer.emailed) Object.assign(r, { status: answer.status, answered_at: now });
+    drawFeedbackAdmin();
+    drawMyFeedback();
+    if (!answer.emailed) status(answer.error || "Saved, but not emailed.", true);
+  } catch (e) {
+    button.disabled = false; note.textContent = `Not sent: ${e.message}`; note.className = "small err fb-reply-msg";
+  }
 }
 
 async function openScreenshot(path) {

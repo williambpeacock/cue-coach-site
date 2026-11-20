@@ -156,6 +156,10 @@ td.fb-text { white-space: normal; min-width: 180px; }
 .fb-controls .grow { flex: 1; min-width: 160px; } .fb-controls .wide { flex-basis: 100%; }
 .fb-controls .grow input { width: 100%; }
 #fb-list { display: flex; flex-direction: column; gap: 10px; }
+.fb-answer { background: var(--panel); border-left: 3px solid #4d7c4d; border-radius: 8px; padding: 6px 10px; text-align: left; }
+.fb-reply { display: flex; flex-direction: column; gap: 6px; }
+.fb-reply textarea { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; width: 100%; resize: vertical; }
+tr.fb-answer-row td { border-top: none; padding-top: 0; }
 /* Admin Dashboard (2026-11-15): player engagement, admins only (dashboard.js). */
 .dash { display: flex; flex-direction: column; gap: 18px; }
 .dash-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
