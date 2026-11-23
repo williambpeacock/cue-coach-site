@@ -61,7 +61,6 @@ input[type=range] { accent-color: var(--accent); }
 <body>
 <div class="wrap">
   <header>
-    <a href="./" style="color:#e8792e;text-decoration:none;font-size:14px;float:right">⌂ Home</a>
     <div class="label" id="subtitle"></div>
     <h1 id="title"></h1>
   </header>
@@ -77,6 +76,7 @@ input[type=range] { accent-color: var(--accent); }
     <button id="play" type="button">Play</button>
     <label class="ctl" for="exagSide">Enlarge sideways <input id="exagSide" type="range" min="1" step="1"><output id="exagSideOut"></output></label>
     <label class="ctl" for="exagUp">Enlarge up/down <input id="exagUp" type="range" min="1" step="1"><output id="exagUpOut"></output></label>
+    <label class="ctl" for="bridgeLen">Bridge length <input id="bridgeLen" type="range" min="3" max="14" step="0.5"><output id="bridgeLenOut"></output></label>
     <label class="ctl" for="speed">Speed <input id="speed" type="range" min="0" step="1"><output id="speedOut"></output></label>
   </div>
   <input id="scrub" type="range" min="0" max="1000" value="1000" aria-label="Time in the stroke">
@@ -97,8 +97,8 @@ input[type=range] { accent-color: var(--accent); }
   </div>
 
   <ul class="notes" id="notes">
-    <li>Angles come from the gyro and are measured against where the cue pointed at contact. "Tip" numbers are those angles at the grip-to-tip distance set in the settings.</li>
-    <li>The grip is drawn sliding straight along the line. Only the cue's turning is measured, not the whole cue sliding sideways or up and down.</li>
+    <li>Angles come from the gyro and are measured against where the cue pointed at contact.</li>
+    <li>The cue is drawn turning about the bridge hand, which stays put on the line of the shot, the bridge length (bridge hand to cue ball, set with the slider) in front of the ball. "Tip" numbers are the angles at the tip's distance from the bridge, so they shrink as the tip comes back toward the bridge. Only the cue's turning is measured, not the whole cue sliding sideways or up and down in the bridge.</li>
     <li>For 30 ms after contact the hit shakes the sensor, so the direction is held still there (the grey band on the chart).</li>
     <li>Left and right are as the shooter sees them, standing behind the cue (confirmed with deliberate steers, 2026-11-07). In the top view the shooter's left is up the screen.</li>
   </ul>
@@ -112,12 +112,13 @@ const DEFAULTS = {
   text: { title: "Where the cue tip went", highlight: "tip", subtitle: "Cue Coach" },
   page: { background: "#1c1e22", panel: "#24272c", line: "#41454d", text: "#f0f0f0", muted: "#9a9da2", accent: "#e8792e", font: "Arial, sans-serif" },
   table: { cloth: "#1f3a33", show_shot_line: true, shot_line_color: "rgba(240,240,240,0.25)", show_table_surface: true, surface_color: "rgba(240,240,240,0.18)" },
-  cue: { length_in: 58, grip_to_tip_in: 46, thickness_in: 0.85, butt_share: 0.45, butt_color: "#3a2416", joint_color: "#d9c49a", shaft_color: "#e9dcc0", ferrule_color: "#f5f5f0", tip_color: "#4d8fd6" },
+  cue: { length_in: 58, grip_to_tip_in: 46, bridge_to_ball_in: 8, thickness_in: 0.85, butt_share: 0.45, butt_color: "#3a2416", joint_color: "#d9c49a", shaft_color: "#e9dcc0", ferrule_color: "#f5f5f0", tip_color: "#4d8fd6" },
   ball: { show: true, color: "#f4f1e8", diameter_in: 2.25, hide_after_contact: true },
   grip: { show: true, color: "rgba(240,240,240,0.8)" },
+  bridge: { show: true, color: "rgba(240,240,240,0.8)" },
   trace: { sideways_color: "#e8792e", height_color: "#6fb3e0", width_px: 2.5, show_full_path_faintly: true },
   views: { top: true, side: true, chart: true, notes: true },
-  enlarge: { sideways: 10, sideways_max: 20, up_down: 3, up_down_max: 10 },
+  enlarge: { sideways: 3, sideways_max: 5, up_down: 3, up_down_max: 5 },
   playback: { speeds: [0.1, 0.25, 0.5, 1], start_speed: 0.25, autoplay: false, loop: false },
   units: "in",
 };
@@ -142,6 +143,9 @@ $("legSide").style.background = S.trace.sideways_color; $("legUp").style.backgro
 const CM = S.units === "cm", UNIT = CM ? "cm" : "in", toUnit = x => CM ? x * 2.54 : x;
 $("chartTitle").textContent = `Tip movement (${UNIT}, real size) against time from contact`;
 const TIP = S.cue.grip_to_tip_in, BUTT = S.cue.length_in - S.cue.grip_to_tip_in, BALL_R = S.ball.diameter_in / 2;
+// the bridge hand to the tip at contact (= to the cue ball); the viewer sets it with the Bridge length slider
+let BRIDGE = S.cue.bridge_to_ball_in;
+$("bridgeLen").value = BRIDGE;
 const RAD = Math.PI / 180;
 const speeds = S.playback.speeds;
 $("exagSide").max = S.enlarge.sideways_max; $("exagSide").value = S.enlarge.sideways;
@@ -152,6 +156,7 @@ const speedName = v => (v === 0.1 ? "⅒" : v === 0.25 ? "¼" : v === 0.5 ? "½"
 const syncOutputs = () => {
   $("exagSideOut").textContent = $("exagSide").value + "×";
   $("exagUpOut").textContent = $("exagUp").value + "×";
+  $("bridgeLenOut").textContent = (CM ? Math.round(BRIDGE * 2.54) : BRIDGE.toFixed(1)) + " " + UNIT;
   $("speedOut").textContent = speedName(speeds[+$("speed").value]);
 };
 
@@ -161,9 +166,12 @@ const F = () => cur().frames;            // [t, grip_in, heading, elevation, twi
 const elev0 = () => F()[F().findIndex(f => f[0] >= 0)][3];
 // heading is + when the tip turns to the shooter's left (steer set 2026-11-07); left/right words and
 // the chart use right +, left −, as the app does
-const sideIn = f => TIP * Math.sin(f[2] * RAD);
+// The cue turns about the bridge hand (Billy, 2026-11-22), which stays on the line BRIDGE in front of
+// the ball; the cue slides through it. The tip's distance from the bridge for a frame (at least 1 in):
+const tipFromBridge = (fr, frames) => Math.max(1, BRIDGE + fr[1] - frames[frames.findIndex(g => g[0] >= 0)][1]);
+const sideIn = f => tipFromBridge(f, F()) * Math.sin(f[2] * RAD);
 const lr = (v, d, unit) => (Math.abs(v) < 0.05 ? "on line" : Math.abs(v).toFixed(d) + unit + (v > 0 ? " left" : " right"));
-const upIn = f => TIP * Math.sin((f[3] - elev0()) * RAD);
+const upIn = f => tipFromBridge(f, F()) * Math.sin((f[3] - elev0()) * RAD);
 
 SHOTS.forEach((d, i) => {
   const b = document.createElement("button");
@@ -222,14 +230,14 @@ function drawView(canvas, kind) {
   ctx.clearRect(0, 0, w, h);
   const frames = F(), f = frames[idx], e0 = elev0();
   // the cue's ends for a frame, in inches (top: lateral enlarged; side: drawn at its real angle, change enlarged)
-  const ends = fr => {
-    if (kind === "top") {
-      const s = Math.sin(fr[2] * RAD);
-      return [[fr[1] - BUTT, -k * BUTT * s], [fr[1] + TIP, k * TIP * s]];
-    }
-    const e = (e0 + k * (fr[3] - e0)) * RAD, c = Math.cos(e), s = Math.sin(e);
-    return [[fr[1] - BUTT * c, -BUTT * s], [fr[1] + TIP * c, TIP * s]];
+  // the bridge stays at xB on the line (y 0); the cue turns about it and slides through it
+  const xB = frames[frames.findIndex(fr => fr[0] >= 0)][1] + TIP - BRIDGE;
+  const along = (fr, d) => {   // the point d inches along the cue from the bridge (+ toward the tip)
+    if (kind === "top") return [xB + d, k * d * Math.sin(fr[2] * RAD)];
+    const e = (e0 + k * (fr[3] - e0)) * RAD;
+    return [xB + d * Math.cos(e), d * Math.sin(e)];
   };
+  const ends = fr => { const dT = fr[1] + TIP - xB; return [along(fr, dT - S.cue.length_in), along(fr, dT)]; };
   const tipAtContact = ends(frames[frames.findIndex(fr => fr[0] >= 0)])[1];
   ctx.font = "11px " + S.page.font;
   if (S.table.show_shot_line) {
@@ -252,10 +260,15 @@ function drawView(canvas, kind) {
   const [b, t] = ends(f);
   drawCue(ctx, X(b[0]), Y(b[1]), X(t[0]), Y(t[1]), Math.max(4, S.cue.thickness_in * sc));
   if (S.grip.show) {
-    const gy = 0;   // the cue turns about the grip, which is drawn on the line in both views
+    const g = along(f, f[1] - xB);   // the grip rides on the cue, behind the bridge
     ctx.strokeStyle = S.grip.color; ctx.lineWidth = 1.5; const rr = Math.max(5, 1.4 * sc);
-    ctx.beginPath(); ctx.arc(X(f[1]), Y(gy), rr, 0, 7); ctx.stroke();
-    ctx.fillStyle = S.grip.color; ctx.fillText("grip", X(f[1]) - 10, Y(gy) + rr + 13);
+    ctx.beginPath(); ctx.arc(X(g[0]), Y(g[1]), rr, 0, 7); ctx.stroke();
+    ctx.fillStyle = S.grip.color; ctx.fillText("grip", X(g[0]) - 10, Y(g[1]) + rr + 13);
+  }
+  if (S.bridge.show) {   // the bridge hand: fixed, the cue's pivot
+    ctx.fillStyle = S.bridge.color; const rb = Math.max(3, 0.6 * sc);
+    ctx.beginPath(); ctx.moveTo(X(xB), Y(0) - rb); ctx.lineTo(X(xB) + rb, Y(0) + rb); ctx.lineTo(X(xB) - rb, Y(0) + rb); ctx.closePath(); ctx.fill();
+    ctx.fillText("bridge", X(xB) - 16, Y(0) + rb + 13);
   }
   ctx.fillStyle = S.page.muted;
   if (kind === "top") { const sl = "shooter's left ↑"; ctx.fillText(sl, w - ctx.measureText(sl).width - 10, 16); ctx.fillText("shooter's right ↓", 8, h - 10); }
@@ -267,7 +280,7 @@ function drawChart() {
   const [ctx, w, h] = fit($("chart"));
   const frames = F(), ph = cur().phases, t0 = frames[0][0], t1 = frames[frames.length - 1][0];
   const all = SHOTS.flatMap(d => { const e = d.frames[d.frames.findIndex(f => f[0] >= 0)][3];
-    return d.frames.flatMap(f => [Math.abs(TIP * Math.sin(f[2] * RAD)), Math.abs(TIP * Math.sin((f[3] - e) * RAD))]); });
+    return d.frames.flatMap(f => { const dT = tipFromBridge(f, d.frames); return [Math.abs(dT * Math.sin(f[2] * RAD)), Math.abs(dT * Math.sin((f[3] - e) * RAD))]; }); });
   const lim = Math.max(0.5, Math.ceil(toUnit(Math.max(...all)) * 2) / 2);
   const L = 36, R = 8, T = 8, B = 20;
   const X = t => L + (t - t0) / (t1 - t0) * (w - L - R), Y = v => T + (lim - v) / (2 * lim) * (h - T - B);
@@ -338,6 +351,7 @@ $("play").onclick = () => {
 };
 $("scrub").oninput = e => { setPlaying(false); idx = Math.round(e.target.value / 1000 * (F().length - 1)); render(); };
 ["exagSide", "exagUp"].forEach(id => $(id).oninput = () => { syncOutputs(); render(); });
+$("bridgeLen").oninput = () => { BRIDGE = +$("bridgeLen").value; syncOutputs(); render(); };
 $("speed").oninput = syncOutputs;
 addEventListener("resize", render);
 syncOutputs();

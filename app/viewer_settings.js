@@ -30,7 +30,8 @@ window.VIEWER_SETTINGS = {
 
   cue: {
     length_in: 58,
-    grip_to_tip_in: 46,               // where the back hand holds it; also sets "inches at the tip"
+    grip_to_tip_in: 46,               // where the back hand holds it
+    bridge_to_ball_in: 8,             // starting bridge length (bridge hand to cue ball; the viewer's slider changes it, 3-14 in)
     thickness_in: 0.85,               // drawn thickness (a real cue tapers ~1.2 in to 0.5 in)
     butt_share: 0.45,                 // how much of the cue is the dark butt section (0 to 1)
     butt_color: "#3a2416",
@@ -52,6 +53,11 @@ window.VIEWER_SETTINGS = {
     color: "rgba(240,240,240,0.8)",
   },
 
+  bridge: {
+    show: true,                       // the bridge hand, drawn as a small triangle on the line
+    color: "rgba(240,240,240,0.8)",
+  },
+
   trace: {
     sideways_color: "#e8792e",        // the tip's path in the top view, and its line on the chart
     height_color: "#6fb3e0",          // the tip's path in the side view, and its line on the chart
@@ -67,10 +73,10 @@ window.VIEWER_SETTINGS = {
   },
 
   enlarge: {
-    sideways: 10,                     // starting value of the slider
-    sideways_max: 20,
+    sideways: 3,                      // starting value of the slider
+    sideways_max: 5,
     up_down: 3,
-    up_down_max: 10,
+    up_down_max: 5,
   },
 
   playback: {
