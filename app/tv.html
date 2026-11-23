@@ -165,8 +165,7 @@ const params = new URLSearchParams(location.search);
 const METRICS = [
   { id: "straight", label: "Straightness", unit: "/100", d: 0, v: (s) => s.straightness_score, sub: (s) => turn(s.straightness_turn_before_deg), why: "How well the cue stayed on its line before and after impact, against shots of similar speed. The first thing coaches fix; higher is straighter." },
   { id: "timing", label: "Timing", unit: "/100", d: 0, v: (s) => s.timing_score, sub: (s) => s.timing_arrival_state ?? "", why: "How well the cue's speed was controlled: a smooth build-up, top speed at contact with no slowing into the ball, then a smooth slowdown, against shots of similar speed. Higher is smoother." },
-  { id: "twist", label: "Cue twist", unit: "°", d: 1, signed: true, v: (s) => s.twist_before_net_deg ?? s.pre_impact_twist, sub: (s) => (s.twist_before_range_deg == null ? "" : `range ${s.twist_before_range_deg.toFixed(1)}° · ${s.twist_before_band}`), why: "The cue rolling on its own axis on the way to the ball (+ = clockwise from behind). Twist adds no spin; it usually comes with steering. The band compares it with shots of the same speed." },
-  { id: "pause", label: "Pause", unit: "s", d: 2, v: (s) => s.pause_seconds, why: "The stop at the back before the forward stroke. Rushing the transition is a classic fault." },
+  { id: "twist", label: "Cue twist", unit: "°", d: 1, signed: true, v: (s) => s.twist_before_net_deg ?? s.pre_impact_twist, sub: (s) => (s.twist_before_range_deg == null ? "" : `range ${s.twist_before_range_deg.toFixed(1)}° · ${s.twist_before_band}`), why: "The cue rolling on its own axis on the way to the ball (+ = clockwise from behind). Twist adds no spin; it usually comes with steering. The band is low under 5°, high over 15° (range, same at every speed)." },
   { id: "back", label: "Backstroke", unit: "in", d: 1, v: (s) => s.backstroke_in, why: "Length of the backswing. Coaches look for the same length for the same shot." },
   { id: "fwd", label: "Forward stroke", unit: "in", d: 1, v: (s) => s.forward_stroke_in, why: "Distance from the back of the stroke to the ball." },
   { id: "ft", label: "Follow-through", unit: "in", d: 1, v: (s) => s.follow_through_in, why: "How far the cue keeps going through the ball. A short one usually means quitting on the shot." },
@@ -175,7 +174,7 @@ const METRICS = [
 // Left/right turn in words (left negative, right positive), as the app's cards say it.
 function turn(d) { return d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${Math.abs(d).toFixed(1)}° ${d < 0 ? "left" : "right"}`; }
 const MAX_PICKS = 8;
-const ORIGINAL = ["straight", "timing", "twist", "pause", "back", "fwd", "ft", "fttime"];  // Billy's metrics sheet, 2026-11-08
+const ORIGINAL = ["straight", "timing", "twist", "back", "fwd", "ft", "fttime"];  // Billy's metrics sheet, 2026-11-08, pause removed 2026-11-22
 const COACH_TOP = METRICS.slice(0, 6).map((m) => m.id);
 const STORE = "cueTvMetrics2";  // new key 2026-11-08: every TV starts on the sheet's 8 once
 function loadPicks() {

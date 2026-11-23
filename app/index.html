@@ -1080,7 +1080,7 @@ function sessionCards(s) {
     card("Straightness", fmt(s.straightness_score_avg, 0), s.straightness_score_avg == null ? "not measured yet" : "out of 100, higher is straighter"),
     card("Timing", fmt(s.timing_score_avg, 0), s.timing_score_avg == null ? "not measured yet"
       : `out of 100 · settled ${s.settled_strokes} of ${s.settled_measured} · finish held ${s.still_finish_strokes} of ${s.still_finish_measured}`),
-    card("Pause", `${fmt(s.pause_avg_s, 2)} s`, s.tempo_ratio_avg ? `tempo ${fmt(s.tempo_ratio_avg, 2)} : 1` : ""),
+    card("Tempo", s.tempo_ratio_avg ? `${fmt(s.tempo_ratio_avg, 1)} : 1` : "–", s.tempo_ratio_avg ? "backswing ÷ forward stroke" : "not measured yet"),
     card("Cue twist", s.twist_net_median_deg == null ? "–" : `${signed(s.twist_net_median_deg)}°`, s.twist_net_median_deg == null ? "not measured yet"
       : `spread ±${fmt(s.twist_net_sd_deg)}° · range ${fmt(s.twist_range_median_deg)}° · ${s.twist_low_strokes} of ${s.twist_strokes} low`),
   ].join("");
@@ -1122,8 +1122,8 @@ async function loadDay(date) {
       const q = new URLSearchParams({ recording: s.recording_id, stroke: s.stroke_no, label });
       return `<td><a href="viewer.html?${q}" target="_blank" rel="noopener">Path</a></td>`;
     };
-    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Backstroke in</th><th>Forward in</th><th>Follow-through in</th><th>Straightness</th><th>Timing</th><th>Twist</th><th>Pause s</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
-      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.forward_stroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td title="Timing out of 100: build-up, arrival at impact and slowdown; the arrival in words">${timing(s)}</td><td title="cue twist before impact: net (+ = clockwise = right), range, and its band for shots of this speed">${twist(s)}</td><td>${fmt(s.pause_seconds, 2)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
+    $("strokes").innerHTML = `<tr><th>Time</th><th>Speed</th><th>Backstroke in</th><th>Forward in</th><th>Follow-through in</th><th>Straightness</th><th>Timing</th><th>Twist</th>${paths ? "<th>Cue path</th>" : ""}</tr>` +
+      strokes.map((s) => `<tr><td>${time(s)}${s.low_confidence ? " *" : ""}</td><td>${speed(s.impact_speed_mps)}</td><td>${fmt(s.backstroke_in)}</td><td>${fmt(s.forward_stroke_in)}</td><td>${fmt(s.follow_through_in)}</td><td title="score out of 100; the turn left or right before impact">${straight(s)}</td><td title="Timing out of 100: build-up, arrival at impact and slowdown; the arrival in words">${timing(s)}</td><td title="cue twist before impact: net (+ = clockwise = right), range, and its band (low under 5°, high over 15°)">${twist(s)}</td>${paths ? pathLink(s) : ""}</tr>`).join("");
     show("who", "day");
     status(strokes.some((s) => s.low_confidence) ? "* speed measured with low confidence" : "");
   } catch (e) { status(e.message, true); }
