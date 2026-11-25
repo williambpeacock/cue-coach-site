@@ -39,13 +39,17 @@ h2 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 20px; 
 .acct-menu button { background: none; border: none; text-align: left; padding: 8px 10px; border-radius: 6px; color: var(--fg); cursor: pointer; }
 .acct-menu button:hover, .acct-menu button:focus-visible { background: var(--panel-2); }
 .acct-menu #delete-link { color: var(--bad); }
-/* Team page (2026-11-25): one tile per area; counts come in step 2. */
+/* Team page (2026-11-25): one tile per area, with a live count where one helps (step 2). */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .tile { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--panel-2); border: 1px solid transparent; border-radius: 12px;
   padding: 16px; color: var(--fg); text-decoration: none; cursor: pointer; font: inherit; }
 .tile:hover, .tile:focus-visible { border-color: var(--accent); outline: none; }
 .tile b { font-family: var(--display); font-weight: 500; font-size: 18px; }
 .tile span { color: var(--muted); font-size: 13px; }
+.tile .count { color: var(--fg); font-size: 14px; font-style: normal; min-height: 1.2em; }
+.tile .count b { font-family: inherit; font-size: 14px; color: var(--accent); }
+.tile.pick { cursor: default; }
+.tile.pick select { margin-top: 6px; width: 100%; }
 .panel { background: var(--panel); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .card { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
@@ -385,13 +389,15 @@ details summary { cursor: pointer; color: var(--accent); }
   <section class="panel" id="team" hidden>
     <h2>Team</h2>
     <div class="tiles">
-      <button class="tile" id="leads-link" hidden><b>Leads</b><span>Sign-ups from the website and the booth</span></button>
-      <button class="tile" id="stock-link" hidden><b>Inventory</b><span>Sensors checked in, sold and held</span></button>
+      <button class="tile" id="leads-link" hidden><b>Leads</b><span>Sign-ups from the website and the booth</span><em class="count" id="leads-count"></em></button>
+      <button class="tile" id="stock-link" hidden><b>Inventory</b><span>Sensors checked in, sold and held</span><em class="count" id="stock-count"></em></button>
       <a class="tile" id="booth-link" href="booth.html" hidden><b>Booth</b><span>Sign a visitor up at a show</span></a>
-      <button class="tile" id="dash-link" hidden><b>Dashboard</b><span>How players are using Cue Coach</span></button>
+      <button class="tile" id="dash-link" hidden><b>Dashboard</b><span>How players are using Cue Coach</span><em class="count" id="dash-count"></em></button>
       <button class="tile" id="people-link" hidden><b>People</b><span>Invite someone, change roles</span></button>
-      <button class="tile" id="fb-inbox-link" hidden><b>Feedback inbox</b><span>Sort and answer what testers send</span></button>
+      <button class="tile" id="fb-inbox-link" hidden><b>Feedback inbox</b><span>Sort and answer what testers send</span><em class="count" id="fb-count"></em></button>
       <a class="tile" id="tv-link" href="tv.html" hidden><b>TV view</b><span>Live numbers on a screen by the table</span></a>
+      <div class="tile pick" id="pick-tile" hidden><b>View a player's log</b><span>Open anyone's training log as they see it</span>
+        <select id="pick-player" aria-label="Player"><option value="">Choose a player…</option></select></div>
     </div>
   </section>
 
@@ -706,8 +712,11 @@ async function signedIn() {
       const linked = new Set((links || []).map((l) => l.student_id));
       players = players.filter((p) => linked.has(p.id));
     }
-    $("player").innerHTML = players.map((p) => `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name)}</option>`).join("");
-    $("player").hidden = players.length < 2;
+    const opts = players.map((p) => `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name)}</option>`).join("");
+    $("player").innerHTML = opts;
+    // Admins pick a player on the Team page (2026-11-25, step 2); coaches keep the picker in the header.
+    $("player").hidden = admin || players.length < 2;
+    if (admin) { $("pick-player").innerHTML = `<option value="">Choose a player…</option>` + opts; $("pick-tile").hidden = players.length < 2; }
   }
   playerIds = Object.fromEntries(players.map((p) => [p.player_code, p.id]));
   playerCode = (players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
@@ -742,6 +751,48 @@ function loadTeam() {
   setAddr("#team");
   show("who", "team");
   $("title").textContent = "Team";
+  teamCounts();
+}
+
+// Live counts on the Team tiles (2026-11-25, step 2). Each count fills in on its own; one that
+// fails stays blank rather than holding up the page.
+async function teamCounts() {
+  const admin = me.role === "admin";
+  const put = (id, html) => ($(id).innerHTML = html);
+  const weekAgo = new Date(Date.now() - 7 * 864e5);
+  const rows = async (table, cols) => {
+    if (mock) return fromMock(table);
+    const { data, error } = await db.from(table).select(cols).limit(10000);
+    if (error) throw error;
+    return data;
+  };
+  const jobs = [
+    rows("leads", "status, first_seen_at").then((L) => {
+      const nw = L.filter((l) => l.status === "new").length, week = L.filter((l) => new Date(l.first_seen_at) >= weekAgo).length;
+      put("leads-count", `<b>${nw}</b> new · <b>${week}</b> this week`);
+    }),
+    rows("inventory_items", "location").then((I) => {
+      const n = (l) => I.filter((it) => it.location === l).length;
+      put("stock-count", `<b>${n("inventory")}</b> on hand · <b>${n("quality_hold")}</b> on hold`);
+    }),
+  ];
+  if (admin) jobs.push(
+    rows("feedback", "status").then((F) => {
+      const nw = F.filter((r) => r.status === "new").length, open = F.filter((r) => ["new", "looking"].includes(r.status)).length;
+      put("fb-count", `<b>${nw}</b> new · <b>${open}</b> open`);
+    }),
+    (async () => {
+      // Active players in the last 7 days, players only (as the Dashboard counts them by default).
+      const to = todayIso(), d = new Date(); d.setDate(d.getDate() - 6);
+      const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      let D;
+      if (mock) D = await fromMock("admin_dashboard");
+      else { const r = await db.rpc("admin_dashboard", { p_from: from, p_to: to }); if (r.error) throw r.error; D = r.data; }
+      const team = new Set(D.people.filter((p) => p.team).map((p) => p.pid));
+      const act = new Set(D.player_days.filter((r) => r.day >= from && r.day <= to && !team.has(r.pid) && (r.shots > 0 || r.drill_shots > 0)).map((r) => r.pid)).size;
+      put("dash-count", `<b>${act}</b> active player${act === 1 ? "" : "s"} this week`);
+    })());
+  await Promise.allSettled(jobs);
 }
 $("team-link").onclick = () => loadTeam();
 // Account menu (2026-11-25): your name opens Send feedback, Set password, Delete account, Sign out.
@@ -2106,7 +2157,7 @@ function openStudentLog(p) {
     $("player").insertAdjacentHTML("beforeend", `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name || "")}</option>`);
     playerIds[p.player_code] = p.id;
   }
-  $("player").hidden = $("player").options.length < 2;
+  $("player").hidden = me.role === "admin" || $("player").options.length < 2;
   playerCode = p.player_code; $("player").value = playerCode;
   show("who", "home"); loadPlayer();
 }
@@ -2243,7 +2294,17 @@ $("delete-go").onclick = async () => {
 };
 // Home (2026-11-09): back to the home screen from any page; staff's home is Leads, unless they also
 // play (2026-11-16): then it's their training log.
-$("home-link").onclick = () => { show("who", "home"); showTab("log"); loadPlayer(); };
+$("home-link").onclick = () => {
+  // An admin's My Training Log tab is their own log; other players' logs open from the Team page.
+  if (me?.role === "admin" && me.player_code && playerIds[me.player_code]) { playerCode = me.player_code; $("player").value = playerCode; }
+  show("who", "home"); showTab("log"); loadPlayer();
+};
+$("pick-player").onchange = () => {
+  const code = $("pick-player").value;
+  if (!code) return;
+  playerCode = code; $("player").value = code; $("pick-player").value = "";
+  show("who", "home"); showTab("log"); loadPlayer();
+};
 $("signout").onclick = () => signOutHere();
 
 // ---- Login upkeep (2026-11-08). A login can be ended elsewhere (the phone's Sign out used to end
