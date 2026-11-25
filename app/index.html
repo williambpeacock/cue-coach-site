@@ -86,6 +86,17 @@ tr.detail td { background: var(--panel-2); }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
 .month { font-family: var(--display); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
 .month:first-child { margin-top: 0; }
+/* Sessions by month fold up (2026-11-25): the newest month opens by itself, older months start closed. */
+details.month-fold { margin-top: 10px; }
+details.month-fold:first-child { margin-top: 0; }
+details.month-fold > summary { list-style: none; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 10px 2px; color: var(--muted); }
+details.month-fold > summary::-webkit-details-marker { display: none; }
+details.month-fold > summary::before { content: "›"; display: inline-block; width: 12px; color: var(--accent); transition: transform .15s; }
+details.month-fold[open] > summary::before { transform: rotate(90deg); }
+details.month-fold > summary .month { margin: 0; color: var(--fg); }
+details.month-fold > summary .small { color: var(--muted); }
+#fargo-all { margin-top: 12px; }
+#fargo-chart-wrap { margin-top: 12px; }
 .entry { display: grid; grid-template-columns: 64px 1fr auto; gap: 14px; align-items: center; width: 100%; text-align: left;
   background: var(--panel); border: 1px solid transparent; border-radius: 12px; padding: 14px 16px; margin-bottom: 8px; cursor: pointer; }
 .entry:hover, .entry:focus-visible { border-color: var(--accent); outline: none; }
@@ -240,20 +251,7 @@ details summary { cursor: pointer; color: var(--accent); }
       <div id="log-view" style="display:flex;flex-direction:column;gap:18px">
         <!-- Coaching (2026-11-13): invites to accept, your coach and your drill. Only on your own log. -->
         <section class="panel" id="coach-panel" hidden></section>
-        <!-- Fargo rating (2026-11-13): typed in by the player, their coach or an admin (FargoRate has no
-             public feed), every entry kept with its date. From fargo_ratings. -->
-        <section class="panel" id="fargo-panel" hidden>
-          <div class="perday-head"><h2>Fargo rating</h2><button id="fargo-update">Update</button></div>
-          <div id="fargo-now"></div>
-          <form class="invite" id="fargo-form" hidden>
-            <label>Rating<input id="fargo-rating" type="number" min="100" max="1000" step="1" inputmode="numeric" required></label>
-            <label>Fargo ID<input id="fargo-id" inputmode="numeric" pattern="[0-9]{1,10}" placeholder="optional"></label>
-            <label>As of<input id="fargo-date" type="date" required></label>
-            <div class="buttons"><button class="primary" type="submit">Save</button><button type="button" id="fargo-cancel">Cancel</button></div>
-          </form>
-          <div class="table-wrap"><table id="fargo-history"></table></div>
-          <div id="fargo-msg" class="msg"></div>
-        </section>
+        <div class="cards" id="log-summary"></div>
         <!-- Scoreboard (2026-11-13, coaching plan step 4): drills on the Cue Coach list, from drill_sets. -->
         <section class="panel" id="scoreboard-panel" hidden>
           <h2>Scoreboard</h2>
@@ -275,7 +273,6 @@ details summary { cursor: pointer; color: var(--accent); }
           <div id="payoff"></div>
           <div class="small" id="payoff-note"></div>
         </section>
-        <div class="cards" id="log-summary"></div>
         <section class="panel" id="perday-panel" hidden>
           <div class="perday-head"><h2>Shots per day</h2>
             <div class="seg" role="group" aria-label="Days shown">
@@ -292,6 +289,23 @@ details summary { cursor: pointer; color: var(--accent); }
           <div class="cal-legend" id="calendar-legend"></div>
         </section>
         <section class="panel" id="reports-panel" hidden><h2>Reports</h2><div class="table-wrap"><table id="reports"></table></div></section>
+        <!-- Fargo rating (2026-11-13): typed in by the player, their coach or an admin (FargoRate has no
+             public feed), every entry kept with its date. From fargo_ratings.
+             2026-11-25 (docs/plans/my_cue_coach_structure_plan.md): moved to the bottom, right above
+             the sessions by month, and drawn as a line chart; the entries sit under a fold. -->
+        <section class="panel" id="fargo-panel" hidden>
+          <div class="perday-head"><h2>Fargo rating</h2><button id="fargo-update">Update</button></div>
+          <div id="fargo-now"></div>
+          <div class="perday-chart" id="fargo-chart-wrap" hidden><canvas id="c-fargo" role="img" aria-label="Fargo rating over time"></canvas></div>
+          <form class="invite" id="fargo-form" hidden>
+            <label>Rating<input id="fargo-rating" type="number" min="100" max="1000" step="1" inputmode="numeric" required></label>
+            <label>Fargo ID<input id="fargo-id" inputmode="numeric" pattern="[0-9]{1,10}" placeholder="optional"></label>
+            <label>As of<input id="fargo-date" type="date" required></label>
+            <div class="buttons"><button class="primary" type="submit">Save</button><button type="button" id="fargo-cancel">Cancel</button></div>
+          </form>
+          <details id="fargo-all" hidden><summary>Show all entries</summary><div class="table-wrap"><table id="fargo-history"></table></div></details>
+          <div id="fargo-msg" class="msg"></div>
+        </section>
         <div id="log"></div>
       </div>
       <section class="panel" id="progress-view" hidden><h2>Week by week</h2><div class="charts">
@@ -692,15 +706,14 @@ const dayOf = (iso) => { const [y, m, d] = iso.split("-").map(Number); return ne
 const longDate = (iso) => dayOf(iso).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 // key, label, how to show it, the change that counts, and whether higher is better (null = neither).
+// No speed here (Billy, 2026-11-25): a day mixes all kinds of shots, so its speed says little; speed
+// matters when the same shot is shot over and over, for consistency.
 const LOG_STATS = [
-  { key: "speed_avg_mps", label: "Speed", show: (v) => `${fmt(v, 2)} m/s`, step: 0.1, better: null },
-  { key: "speed_sd_mps", label: "Spread", show: (v) => `±${fmt(v, 2)}`, step: 0.05, better: false, tip: "how much your speed varied; lower is steadier" },
   { key: "straightness_score_avg", label: "Straightness", show: (v) => fmt(v, 0), step: 3, better: true },
   { key: "timing_score_avg", label: "Timing", show: (v) => fmt(v, 0), step: 3, better: true },
   { key: "backstroke_avg_in", label: "Backstroke", show: (v) => `${fmt(v)} in`, step: 0.5, better: null },
 ];
 const BESTS = [
-  { key: "speed_max_mps", text: "Hardest yet" },
   { key: "straightness_score_avg", text: "Straightest yet" },
   { key: "timing_score_avg", text: "Best timing yet" },
 ];
@@ -727,13 +740,24 @@ function drawSummary(sessions) {
     card("All time", `${count(sessions)} strokes`, plural(sessions.length, "session")),
   ].join("") : "";
 }
+// Sessions by month (2026-11-25): each month folds up, with its sessions and strokes on the closed
+// line; the newest month opens by itself (Billy, 2026-11-25), older months start closed.
 function drawLog(sessions) {
+  const monthOf = (s) => dayOf(s.local_date).toLocaleDateString([], { month: "long", year: "numeric" });
+  const newest = sessions.length ? monthOf(sessions[0]) : "";  // sessions come newest first
+  const totals = {};
+  sessions.forEach((s) => { const t = (totals[monthOf(s)] ??= { n: 0, strokes: 0 }); t.n++; t.strokes += Number(s.strokes || 0); });
   let html = "", month = "";
   sessions.forEach((s, i) => {
     const earlier = sessions.slice(i + 1, i + 6), all = sessions.slice(i + 1);
     const d = dayOf(s.local_date);
-    const m = d.toLocaleDateString([], { month: "long", year: "numeric" });
-    if (m !== month) { html += `<div class="month">${m}</div>`; month = m; }
+    const m = monthOf(s);
+    if (m !== month) {
+      const t = totals[m];
+      html += `${month ? "</details>" : ""}<details class="month-fold"${m === newest ? " open" : ""}><summary><span class="month">${m}</span>` +
+        `<span class="small">${t.n} session${t.n === 1 ? "" : "s"} · ${t.strokes} strokes</span></summary>`;
+      month = m;
+    }
     const badges = all.length >= 3 ? BESTS.filter((b) => s[b.key] != null && all.every((e) => e[b.key] == null || Number(s[b.key]) > Number(e[b.key])))
       .map((b) => `<span class="badge">${b.text}</span>`).join("") : "";
     const stats = LOG_STATS.filter((st) => s[st.key] != null)
@@ -744,6 +768,7 @@ function drawLog(sessions) {
         <div class="stats">${stats || "No measurements"}</div></div>
       <div class="chev">›</div></button>`;
   });
+  if (month) html += "</details>";
   $("log").innerHTML = html;
   $("log").querySelectorAll(".entry").forEach((b) => (b.onclick = () => loadDay(b.dataset.date)));
 }
@@ -1676,9 +1701,12 @@ async function loadFargo() {
       `${last.robustness != null ? ` · ${last.robustness} games` : ""}</div>`
     : `<div class="small">${own ? "No Fargo rating yet. Add yours and keep it up to date: it lets us see which drills and stroke numbers go with higher ratings." : "No Fargo rating entered yet."}</div>`;
   $("fargo-update").textContent = last ? "Update" : "Add rating";
-  $("fargo-history").innerHTML = entries.length < 2 ? "" :
+  drawFargoChart(entries);
+  $("fargo-all").hidden = !entries.length;
+  $("fargo-all").querySelector("summary").textContent = entries.length === 1 ? "Show the entry" : `Show all ${entries.length} entries`;
+  $("fargo-history").innerHTML = !entries.length ? "" :
     `<tr><th>Date</th><th>Rating</th><th>Change</th><th>Entered by</th><th></th></tr>` +
-    entries.slice(0, 12).map((f, i) => {
+    entries.map((f, i) => {
       const prev = entries[i + 1], diff = prev ? f.rating - prev.rating : null;
       const who = f.source === "fargorate" ? "FargoRate" : f.entered_by === me.id ? "You" : f.entered_by === id ? "Player" : "Coach or admin";
       const canRemove = f.entered_by === me.id || me.role === "admin";
@@ -1694,6 +1722,34 @@ async function loadFargo() {
       loadFargo();
     } catch (e) { $("fargo-msg").textContent = `Couldn't remove it: ${e.message}`; }
   }));
+}
+// The rating over time (2026-11-25): one point per entry, spaced by date.
+let fargoChart = null;
+function drawFargoChart(entries) {
+  fargoChart?.destroy(); fargoChart = null;
+  $("fargo-chart-wrap").hidden = !entries.length;
+  if (!entries.length) return;
+  const pts = entries.slice().reverse().map((f) => ({ x: dayOf(f.rated_on).getTime(), y: f.rating, f }));
+  const ys = pts.map((p) => p.y), lo = Math.min(...ys), hi = Math.max(...ys), pad = Math.max(10, Math.round((hi - lo) * 0.15));
+  const day = 864e5, x0 = pts[0].x, x1 = pts[pts.length - 1].x, xpad = x1 > x0 ? (x1 - x0) * 0.04 : 15 * day;
+  fargoChart = new Chart($("c-fargo"), {
+    type: "line",
+    data: { datasets: [{ label: "Fargo rating", data: pts, borderColor: "#e8792e", backgroundColor: "#e8792e", borderWidth: 2,
+      pointRadius: 4, pointHoverRadius: 6, tension: 0.2 }] },
+    options: {
+      maintainAspectRatio: false, animation: { duration: 250 }, parsing: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        title: (it) => longDate(it[0].raw.f.rated_on),
+        label: (it) => ` Fargo ${it.raw.y}${it.raw.f.robustness != null ? ` (${it.raw.f.robustness} games)` : ""}` } } },
+      scales: {
+        x: { type: "linear", min: x0 - xpad, max: x1 + xpad, grid: { display: false },
+          ticks: { color: "#b4b4bb", maxTicksLimit: 6, maxRotation: 0,
+            callback: (v) => new Date(v).toLocaleDateString([], { month: "short", year: "2-digit" }) } },
+        y: { min: Math.floor((lo - pad) / 10) * 10, max: Math.ceil((hi + pad) / 10) * 10,
+          ticks: { color: "#b4b4bb", precision: 0 }, grid: { color: "#3a3a40" } },
+      },
+    },
+  });
 }
 $("fargo-update").addEventListener("click", () => {
   $("fargo-form").hidden = false; $("fargo-update").hidden = true;
