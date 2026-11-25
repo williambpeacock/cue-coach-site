@@ -68,7 +68,7 @@ const sum = (list, f) => list.reduce((a, r) => a + Number(f(r) || 0), 0);
 const pct = (a, b) => (b ? Math.round((100 * a) / b) : null);
 
 $("dash-link").onclick = () => loadDashboard();
-$("dash-back").onclick = () => { show("who", "home"); loadPlayer(); };
+$("dash-back").onclick = () => loadTeam();
 document.querySelectorAll("#dash-range button").forEach((b) => (b.onclick = () => { DASH.range = Number(b.dataset.v); saveView(); drawDashboard(); }));
 document.querySelectorAll("#dash-group button").forEach((b) => (b.onclick = () => { DASH.group = b.dataset.v; saveView(); drawDashboard(); }));
 $("dash-team").onchange = () => { DASH.team = $("dash-team").checked; saveView(); drawDashboard(); };
@@ -76,6 +76,7 @@ $("dash-refresh").onclick = () => loadDashboard(true);
 function saveView() { try { localStorage.setItem("dash-view", JSON.stringify({ range: DASH.range, group: DASH.group, team: DASH.team })); } catch (_) {} }
 
 async function loadDashboard(again = false) {
+  setAddr("#team/dashboard");
   show("who", "dash");
   $("title").textContent = "Dashboard";
   if (DASH.data && !again) return drawDashboard();

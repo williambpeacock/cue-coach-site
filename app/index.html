@@ -26,6 +26,26 @@ header { display: flex; flex-wrap: wrap; justify-content: space-between; align-i
 h1 { margin: 2px 0 0; font-family: var(--display); font-weight: 600; font-size: 32px; line-height: 1.1; }
 h2 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 20px; }
 .who { color: var(--muted); font-size: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* Tabs and account menu (2026-11-25). */
+.apptabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.apptabs button { background: none; border: 1px solid transparent; border-radius: 999px; padding: 6px 14px; color: var(--muted); cursor: pointer; }
+.apptabs button:hover { color: var(--fg); }
+.apptabs button[aria-current="page"] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.acct { position: relative; }
+#player.off { display: none; }
+#acct-btn { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; color: var(--fg); cursor: pointer; }
+.acct-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.acct-menu button { background: none; border: none; text-align: left; padding: 8px 10px; border-radius: 6px; color: var(--fg); cursor: pointer; }
+.acct-menu button:hover, .acct-menu button:focus-visible { background: var(--panel-2); }
+.acct-menu #delete-link { color: var(--bad); }
+/* Team page (2026-11-25): one tile per area; counts come in step 2. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.tile { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--panel-2); border: 1px solid transparent; border-radius: 12px;
+  padding: 16px; color: var(--fg); text-decoration: none; cursor: pointer; font: inherit; }
+.tile:hover, .tile:focus-visible { border-color: var(--accent); outline: none; }
+.tile b { font-family: var(--display); font-weight: 500; font-size: 18px; }
+.tile span { color: var(--muted); font-size: 13px; }
 .panel { background: var(--panel); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .card { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
@@ -192,10 +212,25 @@ details summary { cursor: pointer; color: var(--accent); }
 <body>
 <div class="page">
   <header>
-    <div><div class="brand">CUE COACH</div><h1 id="title">Your stroke</h1></div>
+    <div><div class="brand">CUE COACH</div><h1 id="title">My Training Log</h1></div>
+    <!-- Tabs and account menu (2026-11-25, docs/plans/my_cue_coach_structure_plan.md step 1): one tab per
+         hat (My Training Log, Coaches Corner, Team), shown by role; account items in the menu under your name. -->
     <div class="who" id="who" hidden>
       <select id="player" hidden aria-label="Player"></select>
-      <button class="link" id="home-link" title="Back to the home screen">⌂ Home</button> <span id="me"></span><a class="link" id="booth-link" href="booth.html" hidden>Booth</a> <button class="link" id="students-link" hidden>Students</button> <button class="link" id="dash-link" hidden>Dashboard</button> <button class="link" id="people-link" hidden>People</button> <button class="link" id="leads-link" hidden>Leads</button> <button class="link" id="stock-link" hidden>Inventory</button> <button class="link" id="feedback-link">Feedback</button> <button class="link" id="setpw">Set password</button> <button class="link" id="delete-link">Delete account</button> <button class="link" id="signout">Sign out</button>
+      <nav class="apptabs" aria-label="Pages">
+        <button id="home-link">My Training Log</button>
+        <button id="students-link" hidden>Coaches Corner</button>
+        <button id="team-link" hidden>Team</button>
+      </nav>
+      <div class="acct">
+        <button id="acct-btn" aria-haspopup="true" aria-expanded="false"><span id="me"></span> ▾</button>
+        <div class="acct-menu" id="acct-menu" hidden>
+          <button id="feedback-link">Send feedback</button>
+          <button id="setpw">Set password</button>
+          <button id="delete-link">Delete account</button>
+          <button id="signout">Sign out</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -309,13 +344,11 @@ details summary { cursor: pointer; color: var(--accent); }
         <div id="log"></div>
       </div>
       <section class="panel" id="progress-view" hidden><h2>Week by week</h2><div class="charts">
-        <div class="chart"><canvas id="c-speed"></canvas></div>
-        <div class="chart"><canvas id="c-spread"></canvas></div>
-        <div class="chart"><canvas id="c-back"></canvas></div>
         <div class="chart"><canvas id="c-yaw"></canvas></div>
         <div class="chart"><canvas id="c-twist"></canvas></div>
         <div class="chart"><canvas id="c-twist-sd"></canvas></div>
         <div class="chart"><canvas id="c-timing"></canvas></div>
+        <div class="chart"><canvas id="c-back"></canvas></div>
       </div></section>
     </div>
   </div>
@@ -348,8 +381,22 @@ details summary { cursor: pointer; color: var(--accent); }
     </div>
   </section>
 
+  <!-- Team (2026-11-25, structure plan step 1): admin and staff areas in one place. -->
+  <section class="panel" id="team" hidden>
+    <h2>Team</h2>
+    <div class="tiles">
+      <button class="tile" id="leads-link" hidden><b>Leads</b><span>Sign-ups from the website and the booth</span></button>
+      <button class="tile" id="stock-link" hidden><b>Inventory</b><span>Sensors checked in, sold and held</span></button>
+      <a class="tile" id="booth-link" href="booth.html" hidden><b>Booth</b><span>Sign a visitor up at a show</span></a>
+      <button class="tile" id="dash-link" hidden><b>Dashboard</b><span>How players are using Cue Coach</span></button>
+      <button class="tile" id="people-link" hidden><b>People</b><span>Invite someone, change roles</span></button>
+      <button class="tile" id="fb-inbox-link" hidden><b>Feedback inbox</b><span>Sort and answer what testers send</span></button>
+      <a class="tile" id="tv-link" href="tv.html" hidden><b>TV view</b><span>Live numbers on a screen by the table</span></a>
+    </div>
+  </section>
+
   <section class="panel" id="people" hidden>
-    <div><button class="link" id="people-back">← Strokes</button></div>
+    <div><button class="link" id="people-back">← Team</button></div>
     <h2>Invite someone</h2>
     <p class="small">For a player who already has shots, use their player code: their shots stay theirs. Logins are by invitation only.
       The email has a link to choose a password here; then they sign in on the phone with that email.</p>
@@ -371,7 +418,7 @@ details summary { cursor: pointer; color: var(--accent); }
 
   <!-- Coaching (2026-11-13, plan step 3): a coach's students and invites; admins see every coach's. -->
   <section class="panel" id="students" hidden>
-    <div><button class="link" id="students-back">← Training log</button></div>
+    <div hidden><button class="link" id="students-back">← Training log</button></div>
     <h2>Invite a student</h2>
     <p class="small">They get an email from team@cue-coach.com. Someone without a Cue Coach login gets a link to make one.
       A student has one coach at a time: accepting your invite ends their link with any other coach.</p>
@@ -390,7 +437,7 @@ details summary { cursor: pointer; color: var(--accent); }
   </section>
 
   <section class="panel" id="leads" hidden>
-    <div><button class="link" id="leads-back">← Strokes</button></div>
+    <div><button class="link" id="leads-back">← Team</button></div>
     <h2>Leads</h2>
     <p class="small">Everyone who signed up on cue-coach.com. Status and notes are kept here and saved as you change them.
       <span class="admin-only">Invite… turns a lead into a login (on the People page) and marks them invited.</span></p>
@@ -406,7 +453,7 @@ details summary { cursor: pointer; color: var(--accent); }
   </section>
 
   <section class="panel" id="stock" hidden>
-    <div><button class="link" id="stock-back">← Strokes</button></div>
+    <div><button class="link" id="stock-back">← Team</button></div>
     <h2>Inventory</h2>
     <p class="small">Every sensor checked in on the CC Receiving app. A sensor that passed every check is in Inventory; one that
       failed is in Quality hold with the reasons. Click a sensor for its checks and history. Move… changes where it is
@@ -424,7 +471,7 @@ details summary { cursor: pointer; color: var(--accent); }
   <!-- Admin Dashboard (2026-11-15): player engagement, admins only. Numbers from admin_dashboard(), drawn by dashboard.js. -->
   <div class="dash" id="dash" hidden>
     <section class="panel">
-      <div><button class="link" id="dash-back">← Strokes</button></div>
+      <div><button class="link" id="dash-back">← Team</button></div>
       <div class="dash-controls">
         <div class="seg" id="dash-range" role="group" aria-label="Range"><button data-v="7">7 days</button><button data-v="30">30 days</button><button data-v="90">90 days</button><button data-v="365">1 year</button></div>
         <div class="seg" id="dash-group" role="group" aria-label="Group by"><button data-v="day">Daily</button><button data-v="week">Weekly</button><button data-v="month">Monthly</button></div>
@@ -509,7 +556,7 @@ details summary { cursor: pointer; color: var(--accent); }
 
   <!-- Feedback (2026-11-17, docs/plans/feedback_plan.md): everyone sends; admins sort and answer (feedback.js). -->
   <section class="panel" id="feedback" hidden>
-    <div><button class="link" id="fb-back">← Strokes</button></div>
+    <div><button class="link" id="fb-back">← Back</button></div>
     <h2>Send feedback</h2>
     <p class="small">Ideas, problems, anything confusing, anything you like: it all goes straight to the Cue Coach team, and we read every one.
       Something wrong with a particular shot? Use <b>This shot looks wrong</b> on the shot in the app, so we get the shot too.</p>
@@ -571,7 +618,22 @@ details summary { cursor: pointer; color: var(--accent); }
 const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
-const show = (...ids) => ["signin", "reset", "home", "day", "who", "people", "students", "leads", "stock", "dash", "feedback", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+// Which tab each page belongs to (2026-11-25): lit in the tab row.
+const TAB_OF = { home: "home-link", day: "home-link", students: "students-link", team: "team-link", people: "team-link", leads: "team-link", stock: "team-link", dash: "team-link" };
+const show = (...ids) => {
+  ["signin", "reset", "home", "day", "who", "team", "people", "students", "leads", "stock", "dash", "feedback", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+  const tab = ids.map((id) => TAB_OF[id]).find(Boolean);
+  ["home-link", "students-link", "team-link"].forEach((t) => (t === tab ? $(t).setAttribute("aria-current", "page") : $(t).removeAttribute("aria-current")));
+  $("player").classList.toggle("off", tab !== "home-link");  // the player picker belongs to the training log
+  if ($("acct-menu")) closeAcct();
+};
+// Page addresses (2026-11-25): #log, #progress, #coaches, #team, #team/leads, #team/inventory,
+// #team/dashboard, #team/people, #feedback. Bookmarks and Back work; route() opens the page.
+let routing = false;
+function setAddr(h) {
+  if (location.hash === h) return;
+  (routing ? history.replaceState : history.pushState).call(history, null, "", location.pathname + location.search + h);
+}
 const fmt = (v, d = 1) => (v == null || v === "" ? "–" : Number(v).toFixed(d));
 const turn = (d) => (d == null ? "" : Math.abs(d) < 0.05 ? "straight" : `${fmt(Math.abs(d))}° ${d < 0 ? "left" : "right"}`);  // left negative, right positive
 const straight = (s) => (s.straightness_score == null ? "–" : `${fmt(s.straightness_score, 0)}${s.straightness_turn_before_deg != null ? ` <span class="small">${turn(s.straightness_turn_before_deg)}</span>` : ""}`);
@@ -623,18 +685,18 @@ async function signedIn() {
   $("me").textContent = `${me.display_name || me.player_code || ""}${mock ? " (mock data)" : ""}`;
   $("signout").hidden = mock; $("setpw").hidden = mock;
   checkDeletion();
-  $("people-link").hidden = me.role !== "admin";
-  $("dash-link").hidden = me.role !== "admin";  // admin_dashboard refuses everyone else too
+  const admin = me.role === "admin", team = ["admin", "staff"].includes(me.role);
   $("students-link").hidden = !["admin", "coach"].includes(me.role);
-  $("booth-link").hidden = !["admin", "staff"].includes(me.role);
-  $("leads-link").hidden = !["admin", "staff"].includes(me.role);
-  $("stock-link").hidden = !["admin", "staff"].includes(me.role);
+  $("team-link").hidden = !team;
+  ["leads-link", "stock-link", "booth-link"].forEach((id) => ($(id).hidden = !team));
+  ["dash-link", "people-link", "fb-inbox-link", "tv-link"].forEach((id) => ($(id).hidden = !admin));  // admin_dashboard refuses everyone else too
   // Staff (2026-11-05) see Leads and Inventory (2026-11-08), no People page. A staff member who is
   // also a player (has a player code, or a coach's invite or link waiting) gets their own training
   // log too, like a player (2026-11-16: Katherine, KS01, couldn't see Billy's invite). Others: Leads.
-  const leadsOnly = me.role === "staff" && !(await staffPlays());
-  $("leads-back").hidden = leadsOnly; $("stock-back").hidden = leadsOnly;
-  if (leadsOnly) return location.hash === "#feedback" ? loadFeedback() : loadLeads();
+  // 2026-11-25: they land on Team (Leads and Inventory are tiles there) and have no training log tab.
+  leadsOnly = me.role === "staff" && !(await staffPlays());
+  $("home-link").hidden = leadsOnly;
+  if (leadsOnly) return route(location.hash);
   // Coaches and admin pick a player; a player (or staff) sees only themself.
   let players = [me];
   if (!["player", "staff"].includes(me.role)) {
@@ -650,10 +712,43 @@ async function signedIn() {
   playerIds = Object.fromEntries(players.map((p) => [p.player_code, p.id]));
   playerCode = (players.find((p) => p.player_code === me.player_code) || players[0] || {}).player_code;
   if (playerCode) $("player").value = playerCode;
-  // The link in Katherine's feedback emails opens Feedback once the strokes have loaded behind it.
-  if (location.hash === "#feedback") loadPlayer().then(loadFeedback);
-  else loadPlayer();
+  // The training log loads behind whatever page the address opens (#feedback is the link in the
+  // feedback emails; coaches land on Coaches Corner).
+  loadPlayer();
+  route(location.hash);
 }
+let leadsOnly = false;
+/** Opens the page an address names, if this person may see it; otherwise their landing page. */
+function route(hash) {
+  const r = (hash || "").replace(/^#/, ""), role = me.role;
+  const admin = role === "admin", team = admin || role === "staff", coach = admin || role === "coach";
+  routing = true;
+  try {
+    if (r === "coaches" && coach) return void loadStudents();
+    if (r === "team" && team) return void loadTeam();
+    if (r === "team/leads" && team) return void loadLeads();
+    if (r === "team/inventory" && team) return void loadStock();
+    if (r === "team/dashboard" && admin) return void loadDashboard();
+    if (r === "team/people" && admin) return void loadPeople();
+    if (r === "feedback") return void loadFeedback();
+    if ((r === "log" || r === "progress") && !leadsOnly) { show("who", "home"); return void showTab(r); }
+    if (leadsOnly) return void loadTeam();
+    if (role === "coach") return void loadStudents();
+    show("who", "home"); showTab("log");
+  } finally { routing = false; }
+}
+window.addEventListener("popstate", () => { if (me) route(location.hash); });
+function loadTeam() {
+  setAddr("#team");
+  show("who", "team");
+  $("title").textContent = "Team";
+}
+$("team-link").onclick = () => loadTeam();
+// Account menu (2026-11-25): your name opens Send feedback, Set password, Delete account, Sign out.
+function closeAcct() { $("acct-menu").hidden = true; $("acct-btn").setAttribute("aria-expanded", "false"); }
+$("acct-btn").onclick = (e) => { e.stopPropagation(); const open = $("acct-menu").hidden; $("acct-menu").hidden = !open; $("acct-btn").setAttribute("aria-expanded", String(open)); };
+document.addEventListener("click", (e) => { if (!e.target.closest(".acct")) closeAcct(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAcct(); });
 
 /** Staff who also play: a player code, or a coach's invite or link waiting for them. */
 async function staffPlays() {
@@ -681,7 +776,8 @@ async function loadPlayer() {
     sessions.sort((a, b) => (a.local_date < b.local_date ? 1 : -1));
     weeks.sort((a, b) => (a.week_of > b.week_of ? 1 : -1));
     const name = sessions[0]?.player || playerCode;
-    $("title").textContent = playerCode === me.player_code ? "Your stroke" : `${name}'s stroke`;
+    // Only while the log is showing: it loads behind other pages too (Team, Coaches Corner, Feedback).
+    if (!$("home").hidden) $("title").textContent = playerCode === me.player_code ? "My Training Log" : `${name}'s Training Log`;
     allSessions = sessions; allWeeks = weeks;
     drawSummary(sessions);
     drawLog(sessions);
@@ -693,7 +789,7 @@ async function loadPlayer() {
     loadFargo();
     loadScoreboard();
     loadPayoff();
-    if ($("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden && $("dash").hidden && $("feedback").hidden) show("who", "home");  // an admin page opened meanwhile stays open
+    if ($("team").hidden && $("people").hidden && $("students").hidden && $("leads").hidden && $("stock").hidden && $("dash").hidden && $("feedback").hidden && $("delete-account").hidden) show("who", "home");  // an admin page opened meanwhile stays open
     status(sessions.length ? "" : "No sessions yet: record a shot with the app.");
   } catch (e) { status(e.message, true); }
 }
@@ -1086,6 +1182,7 @@ document.querySelectorAll("#perday-panel .seg button").forEach((b) => (b.onclick
 }));
 
 function showTab(which) {
+  if (!$("home").hidden) setAddr(which === "progress" ? "#progress" : "#log");
   $("tab-log").setAttribute("aria-selected", which === "log"); $("tab-progress").setAttribute("aria-selected", which === "progress");
   $("log-view").hidden = which !== "log"; $("progress-view").hidden = which !== "progress";
   if (which === "progress") drawWeeks(allWeeks);  // drawn when visible so the charts get their size
@@ -1120,9 +1217,9 @@ function drawWeeks(weeks) {
     options: { maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: title, color: "#f4f4f5", align: "start" } },
       scales: { x: { ticks: { color: "#b4b4bb" }, grid: { color: "#3a3a40" } }, y: { ticks: { color: "#b4b4bb" }, grid: { color: "#3a3a40" } } } },
   });
+  // No speed or speed spread (Billy, 2026-11-25): a week mixes all kinds of shots; speed matters only
+  // when the same shot is shot over and over.
   charts = [
-    line("c-speed", "Speed (m/s)", "speed_avg_mps"),
-    line("c-spread", "Speed spread (m/s, lower = steadier)", "speed_sd_mps"),
     line("c-back", "Backstroke (in)", "backstroke_avg_in"),
     line("c-yaw", "Straightness (out of 100, higher = straighter)", "straightness_score_avg"),
     line("c-timing", "Timing (out of 100, higher = smoother)", "timing_score_avg"),
@@ -1278,6 +1375,7 @@ function statusTag(p) {
 }
 
 async function loadPeople(note) {
+  setAddr("#team/people");
   show("who", "people");
   $("title").textContent = "People";
   status("Loading…");
@@ -1334,7 +1432,7 @@ $("invite-form").onsubmit = (e) => { e.preventDefault(); act(inviteBody(false));
 $("inv-link").onclick = () => { if ($("invite-form").reportValidity()) act(inviteBody(true)); };
 $("link-copy").onclick = async () => { await navigator.clipboard.writeText($("link-out").value); $("link-copy").textContent = "Copied"; setTimeout(() => ($("link-copy").textContent = "Copy"), 1500); };
 $("people-link").onclick = () => loadPeople();
-$("people-back").onclick = () => { show("who", "home"); loadPlayer(); };
+$("people-back").onclick = () => loadTeam();
 
 // ---- Leads (2026-11-05), for admins and staff. Read and updated straight from the leads table:
 // its database rules let only admins and staff in, only status, notes and the login link change,
@@ -1344,6 +1442,7 @@ let leadRows = [], invitingLead = null;
 $("lead-status").innerHTML += LEAD_STATUSES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 
 async function loadLeads() {
+  setAddr("#team/leads");
   show("who", "leads");
   $("title").textContent = "Leads";
   status("Loading…");
@@ -1457,7 +1556,7 @@ async function inviteLead(l) {
 }
 
 $("leads-link").onclick = () => loadLeads();
-$("leads-back").onclick = () => { show("who", "home"); loadPlayer(); };
+$("leads-back").onclick = () => loadTeam();
 ["lead-search", "lead-status", "lead-beta"].forEach((id) => ($(id).oninput = drawLeads));
 $("people-link").addEventListener("click", () => (invitingLead = null));
 
@@ -1470,6 +1569,7 @@ let stockItems = [], stockChecks = [], stockEvents = [], stockShown = [], stockO
 $("stock-loc").innerHTML += LOCATIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 
 async function loadStock() {
+  setAddr("#team/inventory");
   show("who", "stock");
   $("title").textContent = "Inventory";
   status("Loading…");
@@ -1583,7 +1683,7 @@ function downloadStockCsv() {
 }
 
 $("stock-link").onclick = () => loadStock();
-$("stock-back").onclick = () => { show("who", "home"); loadPlayer(); };
+$("stock-back").onclick = () => loadTeam();
 $("stock-csv").onclick = downloadStockCsv;
 ["stock-search", "stock-loc"].forEach((id) => ($(id).oninput = drawStock));
 
@@ -1837,8 +1937,9 @@ async function loadMyCoaching() {
 // The Students page: a coach's students and invites (admins: everyone's), assign a drill.
 let studentsState = null;
 async function loadStudents(note) {
+  setAddr("#coaches");
   show("who", "students");
-  $("title").textContent = "Students";
+  $("title").textContent = "Coaches Corner";
   $("assign-box").hidden = true; $("review-box").hidden = true;
   status("Loading…");
   const admin = me.role === "admin";
@@ -1972,7 +2073,7 @@ async function openReview({ p, a }) {
       const why = made.error || made.result?.note || "";
       $("rv-report").innerHTML = r ? `<button class="link" id="rv-open"><b>Open the Cue Coach Report</b></button> <span class="small">(${esc(r.title)}${made.result?.made ? "; just updated with the shots that came in" : ""})</span>`
         : `Its Cue Coach Report couldn't be made yet${why ? `: ${esc(why)}` : ""}. It is made once the test's shots are in the cloud; open this again later.`;
-      $("rv-open")?.addEventListener("click", () => { reportBack = () => { show("who", "students"); $("title").textContent = "Students"; }; showReport(r); });
+      $("rv-open")?.addEventListener("click", () => { reportBack = () => { show("who", "students"); $("title").textContent = "Coaches Corner"; }; showReport(r); });
     }).catch((e) => { if ($("rv-report")) $("rv-report").textContent = e.message; });
   const comment = async () => {
     const body = $("rv-comment").value.trim();
@@ -2122,14 +2223,14 @@ $("deletion-keep").onclick = async () => {
   } catch (e) { $("deletion-msg").textContent = e.message; }
   $("deletion-keep").disabled = false;
 };
-$("delete-link").onclick = () => { $("delete-msg").textContent = ""; $("delete-shots").checked = false; $("delete-shots").onchange(); show("who", "delete-account"); };
+$("delete-link").onclick = () => { $("title").textContent = "Delete account"; $("delete-msg").textContent = ""; $("delete-shots").checked = false; $("delete-shots").onchange(); show("who", "delete-account"); };
 $("delete-shots").onchange = () => {
   const too = $("delete-shots").checked;
   $("delete-shots-words").textContent = too ? "Your shots will be deleted too."
     : "Your shots are kept without your name, email or player code, so they can't be traced back to you. They help us improve how Cue Coach measures a stroke.";
   $("delete-go").textContent = too ? "Delete account and shots" : "Delete account";
 };
-$("delete-cancel").onclick = () => { show("who", "home"); };
+$("delete-cancel").onclick = () => (leadsOnly ? loadTeam() : $("home-link").onclick());
 $("delete-go").onclick = async () => {
   if (!confirm("Delete your Cue Coach account? You'll be signed out everywhere now, and the account is deleted in 7 days.")) return;
   $("delete-go").disabled = true; $("delete-msg").textContent = "";
@@ -2142,7 +2243,7 @@ $("delete-go").onclick = async () => {
 };
 // Home (2026-11-09): back to the home screen from any page; staff's home is Leads, unless they also
 // play (2026-11-16): then it's their training log.
-$("home-link").onclick = async () => (me?.role === "staff" && !(await staffPlays()) ? loadLeads() : (show("who", "home"), loadPlayer()));
+$("home-link").onclick = () => { show("who", "home"); showTab("log"); loadPlayer(); };
 $("signout").onclick = () => signOutHere();
 
 // ---- Login upkeep (2026-11-08). A login can be ended elsewhere (the phone's Sign out used to end
@@ -2170,7 +2271,7 @@ async function callFunction(path, init = {}) {
   await signOutHere(note);
   throw new Error(note);
 }
-$("player").onchange = () => { playerCode = $("player").value; show("who", "home"); loadPlayer(); };
+$("player").onchange = () => { playerCode = $("player").value; show("who", "home"); showTab("log"); loadPlayer(); };
 $("back").onclick = () => { show("who", "home"); status(""); };
 start();
 </script>

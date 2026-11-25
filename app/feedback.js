@@ -38,12 +38,16 @@ $("fb-f-status").innerHTML = `<option value="open">Open (new or looking into it)
 $("fb-f-kind").innerHTML = `<option value="">Every kind</option>` +
   Object.entries(FB_KINDS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
 
-$("feedback-link").onclick = () => loadFeedback();
-$("fb-back").onclick = () => { history.replaceState(null, "", location.pathname + location.search); show("who", "home"); loadPlayer(); };
+// 2026-11-25: Send feedback is in the account menu; admins' inbox is a tile on Team. Back returns there.
+let fbFrom = "log";
+$("feedback-link").onclick = () => { fbFrom = "log"; loadFeedback(); };
+$("fb-inbox-link").onclick = () => { fbFrom = "team"; loadFeedback(); };
+$("fb-back").onclick = () => (fbFrom === "team" || leadsOnly ? loadTeam() : $("home-link").onclick());
 ["fb-f-status", "fb-f-kind"].forEach((id) => ($(id).onchange = drawFeedbackAdmin));
 $("fb-f-search").oninput = drawFeedbackAdmin;
 
 async function loadFeedback() {
+  setAddr("#feedback");
   show("who", "feedback");
   $("title").textContent = "Feedback";
   $("fb-admin").hidden = me.role !== "admin";
