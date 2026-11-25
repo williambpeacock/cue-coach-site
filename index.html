@@ -181,6 +181,8 @@
 
   footer { padding: 32px 0 48px; text-align: center; font-size: 0.85rem; color: var(--text-dim); }
   footer a { color: var(--text-dim); }
+  a.more { color: var(--orange); text-decoration: none; font-weight: 600; }
+  a.more:hover, a.more:focus-visible { text-decoration: underline; }
   footer .tm-note { margin-top: 8px; font-size: 0.78rem; opacity: 0.8; }
   /* Trademark sign: small and raised, without stretching the line. */
   sup.tm { font-size: 0.5em; vertical-align: super; line-height: 0; font-weight: 400; margin-left: 0.05em; }
@@ -224,7 +226,7 @@
     <nav class="head-links" aria-label="On this page">
       <a href="#how">How it works</a>
       <a href="#every-shot">The app</a>
-      <a href="#coaches">For coaches</a>
+      <a href="coaches/">For coaches</a>
       <a href="#sensor">The sensor</a>
       <a href="#signup" data-beta>Join the beta</a>
     </nav>
@@ -352,6 +354,7 @@
             <li>See every student's shots on My Cue Coach</li>
             <li>Give drills and tests, and get a report after each test</li>
           </ul>
+          <p style="margin-top: 14px"><a class="more" href="coaches/">Cue Coach for coaches &rarr;</a></p>
         </div>
       </div>
     </div>
@@ -435,10 +438,16 @@
   </section>
 </main>
 
-<footer>&copy; 2026 Cue Coach LLC · <a href="mailto:team@cue-coach.com">team@cue-coach.com</a> · <a href="app/">My Cue Coach (sign in)</a> · <a href="privacy/">Privacy</a>
+<footer>&copy; 2026 Cue Coach LLC · <a href="mailto:team@cue-coach.com">team@cue-coach.com</a> · <a href="coaches/">For coaches</a> · <a href="app/">My Cue Coach (sign in)</a> · <a href="privacy/">Privacy</a>
   <p class="tm-note">Cue Coach<sup class="tm">&trade;</sup> is a trademark of Cue Coach LLC.</p></footer>
 
 <script>
+  // Coming from the coaches page (?coach=1): Coach and the beta box are ticked already.
+  if (new URLSearchParams(location.search).has('coach')) {
+    const f = document.getElementById('signup-form');
+    f.querySelector('input[name="role"][value="Coach"]').checked = true;
+    f.querySelector('input[name="beta"]').checked = true;
+  }
   // Every "Sign up for the beta" link ticks the beta box on the way to the form.
   document.querySelectorAll('[data-beta]').forEach((a) => a.addEventListener('click', () => {
     const box = document.querySelector('#signup-form input[name="beta"]');
