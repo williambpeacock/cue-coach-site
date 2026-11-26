@@ -155,9 +155,9 @@ function drawFeedbackAdmin() {
     return `<div class="fb-card fb-${r.status}" data-id="${r.id}">
       <div class="fb-head"><span class="tag">${esc(FB_KINDS[r.kind])}</span> <b>${esc(who(r))}</b>
         <span class="small">${fbDate(r.created_at)} · ${esc(FB_SOURCE[r.source] || r.source)} · #${r.id}${r.source !== "email" && !r.emailed_at && !["testflight", "play"].includes(r.source) ? " · not emailed" : ""}</span></div>
-      ${r.shot_reason ? `<div><b>${esc(FB_REASONS[r.shot_reason])}</b></div>` : ""}
-      <div class="fb-text">${esc(r.message) || '<span class="small">(no message)</span>'}</div>
-      ${shot || r.screenshot_path || details ? `<div class="small">${[shot, r.screenshot_path ? `<button class="link" data-shot="${esc(r.screenshot_path)}">Screenshot</button>` : "", details].filter(Boolean).join(" · ")}</div>` : ""}
+      ${r.shot_reason ? `<div class="fb-text">What they reported: <b>${esc(FB_REASONS[r.shot_reason] || r.shot_reason)}</b>${shot ? ` · ${shot}` : ""}</div>` : ""}
+      ${r.message ? `<div class="fb-text">${esc(r.message)}</div>` : `<div class="small">(${r.shot_reason ? "they added no note" : "no message"})</div>`}
+      ${(shot && !r.shot_reason) || r.screenshot_path || details ? `<div class="small">${[r.shot_reason ? "" : shot, r.screenshot_path ? `<button class="link" data-shot="${esc(r.screenshot_path)}">Screenshot</button>` : "", details].filter(Boolean).join(" · ")}</div>` : ""}
       ${repliesTo(r.id).map((a) => `<div class="fb-answer"><span class="small">Answered by ${esc(FB.people[a.author_id]?.display_name || "an admin")}, ${fbDate(a.created_at)}${
         a.emailed_at ? ` · emailed to ${esc(a.emailed_to)}` : " · not emailed"}</span><div class="fb-text">${esc(a.message)}</div></div>`).join("")}
       ${canEmail(r) ? `<div class="fb-reply">
