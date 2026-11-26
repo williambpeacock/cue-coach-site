@@ -529,7 +529,7 @@ details summary { cursor: pointer; color: var(--accent); }
     </section>
 
     <section class="panel">
-      <h2>When they practise</h2>
+      <h2>When they practice</h2>
       <p class="small">Shots by weekday and hour, in each player's own time zone. Darker blue is fewer, lighter is more; hover for the count.</p>
       <div class="heat-wrap" id="dash-heat"></div>
     </section>
@@ -983,7 +983,7 @@ async function loadScoreboard() {
       <td>${boardTrend(values, max)}</td>
       <td>${kind === "practice" ? (streak ? `${streak} day${streak === 1 ? "" : "s"}` : "–") : ""}</td></tr>`;
   }).join("");
-  $("scoreboard").innerHTML = `<tr><th>Drill</th><th>Sets</th><th>Last</th><th>Best</th><th title="average of the last 10 scored sets">Last 10 avg</th><th>Trend</th><th title="days practised in a row, up to today or yesterday">Days in a row</th></tr>${body}`;
+  $("scoreboard").innerHTML = `<tr><th>Drill</th><th>Sets</th><th>Last</th><th>Best</th><th title="average of the last 10 scored sets">Last 10 avg</th><th>Trend</th><th title="days practiced in a row, up to today or yesterday">Days in a row</th></tr>${body}`;
   const allDays = daysInARow(sets.map((s) => s.drill_date));
   $("scoreboard-note").textContent = [
     allDays ? `${allDays} day${allDays === 1 ? "" : "s"} in a row on Cue Coach drills.` : "",
@@ -1819,7 +1819,7 @@ function stepOf(a, tests, forStudent) {
     return { key: "review", text: forStudent ? "Test sent: waiting for your coach" : "Test waiting for your review" };
   }
   if (!a.target_set_at) return { key: "target", text: forStudent ? "Waiting for your coach's target" : "Set the target" };
-  if (a.due_date && a.due_date > isoDay(new Date())) return { key: "practice", text: `Practising · test due ${shortDay(a.due_date)}` };
+  if (a.due_date && a.due_date > isoDay(new Date())) return { key: "practice", text: `Practicing · test due ${shortDay(a.due_date)}` };
   return { key: "due", text: "Test due" };
 }
 

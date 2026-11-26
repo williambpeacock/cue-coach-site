@@ -223,7 +223,7 @@ function drawDashboard() {
       (g === "Normal" ? "" : items.map(([k, n]) => row(k.split("|")[1], n, items[0][1])).join(""));
   }).join("") : `<p class="msg">No shots in this range.</p>`;
 
-  // ---- When they practise: weekday by hour, darker = more shots.
+  // ---- When they practice: weekday by hour, darker = more shots.
   const heat = Array.from({ length: 7 }, () => Array(24).fill(0));
   D.hours.filter((h) => counted(h.pid) && (!h.day || (h.day >= from && h.day <= to))).forEach((h) => (heat[h.dow][h.hour] += h.shots));
   const hmax = Math.max(1, ...heat.flat());
