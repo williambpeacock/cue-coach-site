@@ -180,6 +180,9 @@ details.month-fold > summary .small { color: var(--muted); }
 .tag.withdrawn, .tag.redone, .tag.closed { color: var(--muted); }
 .tag.passed { color: #a6e3a1; }
 .scards > .empty { grid-column: 1 / -1; }
+.needs-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--accent); color: #111; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center; }
+#coach-board td, #coach-board th { text-align: left; white-space: normal; vertical-align: top; }
+ul.ov { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
 .cc-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .assign { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .assign label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
@@ -410,10 +413,19 @@ details summary { cursor: pointer; color: var(--accent); }
       <button class="tile" id="dash-link" hidden><b>Dashboard</b><span>How players are using Cue Coach</span><em class="count" id="dash-count"></em></button>
       <button class="tile" id="people-link" hidden><b>People</b><span>Invite someone, change roles</span></button>
       <button class="tile" id="fb-inbox-link" hidden><b>Feedback inbox</b><span>Sort and answer what testers send</span><em class="count" id="fb-count"></em></button>
+      <button class="tile" id="ov-link" hidden><b>Coaching overview</b><span>Tests stuck or waiting long, emails that failed</span><em class="count" id="ov-count"></em></button>
       <a class="tile" id="tv-link" href="tv.html" hidden><b>TV view</b><span>Live numbers on a screen by the table</span></a>
       <div class="tile pick" id="pick-tile" hidden><b>View a player's log</b><span>Open anyone's training log as they see it</span>
         <select id="pick-player" aria-label="Player"><option value="">Choose a player…</option></select></div>
     </div>
+  </section>
+
+  <section class="panel" id="overview" hidden>
+    <div><button class="link" id="ov-back">← Team</button></div>
+    <h2>Coaching overview</h2>
+    <p class="small">What may need a hand, across every coach: a test started over a day ago and never sent, a test
+      waiting more than 3 days for its coach, an invite or coaching email that didn't send in the last 14 days.</p>
+    <div id="ov-list"></div>
   </section>
 
   <section class="panel" id="people" hidden>
@@ -447,6 +459,11 @@ details summary { cursor: pointer; color: var(--accent); }
     <div class="scards" id="student-cards"></div>
     <div id="assign-box" class="assign" hidden></div>
     <div id="review-box" class="assign" hidden></div>
+    <div id="coach-board-panel" hidden>
+      <h2 style="margin-top:12px">Scoreboard</h2>
+      <p class="small">Each student's practice on their current drill, most recently practised first.</p>
+      <div class="table-wrap"><table id="coach-board"></table></div>
+    </div>
     <h2 style="margin-top:12px">Invites</h2>
     <div class="table-wrap"><table id="invites-table"></table></div>
     <!-- Invite a student at the bottom (Billy, 2026-11-27). -->
@@ -644,10 +661,10 @@ const MPH = 2.237;
 const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
 // Which tab each page belongs to (2026-11-25): lit in the tab row.
-const TAB_OF = { home: "home-link", day: "home-link", students: "students-link", team: "team-link", people: "team-link", leads: "team-link", stock: "team-link", dash: "team-link" };
+const TAB_OF = { home: "home-link", day: "home-link", students: "students-link", team: "team-link", overview: "team-link", people: "team-link", leads: "team-link", stock: "team-link", dash: "team-link" };
 let viewFrom = null;  // "coaches" or "team" while showing someone else's log from there
 const show = (...ids) => {
-  ["signin", "reset", "home", "day", "who", "team", "people", "students", "leads", "stock", "dash", "feedback", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
+  ["signin", "reset", "home", "day", "who", "team", "overview", "people", "students", "leads", "stock", "dash", "feedback", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
   // Someone else's log opened from Coaches Corner or Team keeps that tab lit, with a back link (2026-11-27).
   const inLog = ids.some((id) => ["home", "day", "report-view"].includes(id));
   if (!inLog) viewFrom = null;
@@ -720,7 +737,7 @@ async function signedIn() {
   $("students-link").hidden = !["admin", "coach"].includes(me.role);
   $("team-link").hidden = !team;
   ["leads-link", "stock-link", "booth-link"].forEach((id) => ($(id).hidden = !team));
-  ["dash-link", "people-link", "fb-inbox-link", "tv-link"].forEach((id) => ($(id).hidden = !admin));  // admin_dashboard refuses everyone else too
+  ["dash-link", "people-link", "fb-inbox-link", "ov-link", "tv-link"].forEach((id) => ($(id).hidden = !admin));  // admin_dashboard refuses everyone else too
   // Staff (2026-11-05) see Leads and Inventory (2026-11-08), no People page. A staff member who is
   // also a player (has a player code, or a coach's invite or link waiting) gets their own training
   // log too, like a player (2026-11-16: Katherine, KS01, couldn't see Billy's invite). Others: Leads.
@@ -751,6 +768,7 @@ async function signedIn() {
   // feedback emails; coaches land on Coaches Corner).
   loadPlayer();
   route(location.hash);
+  if (["admin", "coach"].includes(me.role) && !location.hash.startsWith("#coaches")) fetchCoaching().catch(() => {});  // the "needs you" count
 }
 let leadsOnly = false;
 /** Opens the page an address names, if this person may see it; otherwise their landing page. */
@@ -760,6 +778,8 @@ function route(hash) {
   routing = true;
   try {
     if (r === "coaches" && coach) return void loadStudents();
+    const tv = r.match(/^coaches\/test\/([0-9a-f-]{36})$/);
+    if (tv && coach) return void loadStudents().then(() => openTestFromLink(tv[1]));
     const v = r.match(/^(coaches|team\/log)\/([A-Za-z0-9]+)(\/progress)?$/);
     if (v && (v[1] === "coaches" ? coach : admin) && playerIds[v[2]]) {
       playerCode = v[2]; $("player").value = playerCode; viewFrom = v[1] === "coaches" ? "coaches" : "team";
@@ -770,6 +790,7 @@ function route(hash) {
     if (r === "team/inventory" && team) return void loadStock();
     if (r === "team/dashboard" && admin) return void loadDashboard();
     if (r === "team/people" && admin) return void loadPeople();
+    if (r === "team/coaching" && admin) return void loadOverview();
     if (r === "feedback") return void loadFeedback();
     if ((r === "log" || r === "progress") && !leadsOnly) {
       if (viewFrom) { viewFrom = null; if (me.player_code && playerIds[me.player_code]) { playerCode = me.player_code; $("player").value = playerCode; loadPlayer(); } }
@@ -786,6 +807,45 @@ function loadTeam() {
   show("who", "team");
   $("title").textContent = "Team";
   teamCounts();
+}
+
+// Coaching overview (2026-11-27, step 4): admins see what may be stuck, across every coach.
+async function coachingStuck() {
+  const st = await fetchCoaching(), { people, assignments, tests, invites } = st;
+  const name = (id) => nameOf(people, id), now = Date.now(), dayMs = 864e5;
+  const drillFor = (t) => { const a = assignments.find((x) => x.id === t.assignment_id); return a ? drillText(a) : "a drill"; };
+  const coachOf = (t) => name(assignments.find((x) => x.id === t.assignment_id)?.coach_id);
+  const items = [];
+  for (const t of tests) {
+    if (t.status === "in_progress" && now - new Date(t.started_at) > dayMs) {
+      items.push({ when: t.started_at, what: `${esc(name(t.student_id))}'s ${t.kind === "baseline" ? "baseline" : "test"} on ${drillFor(t)} was started ${shortDay(t.started_at)} and never sent`, who: `coach ${esc(coachOf(t))}` });
+    } else if (t.status !== "in_progress" && !t.reviewed_at && now - new Date(t.started_at) > 3 * dayMs) {
+      items.push({ when: t.started_at, what: `${esc(name(t.student_id))}'s ${t.kind === "baseline" ? "baseline" : "test"} on ${drillFor(t)} (${shortDay(t.started_at)}) is waiting for review`, who: `coach ${esc(coachOf(t))}` });
+    }
+  }
+  for (const i of invites) if (i.status === "sent" && i.email_error) {
+    items.push({ when: i.created_at, what: `The invite to ${esc(i.email)} didn't send: ${esc(i.email_error)}`, who: `coach ${esc(name(i.coach_id))}` });
+  }
+  if (!mock) {
+    const since = new Date(now - 14 * dayMs).toISOString();
+    const { data } = await db.from("coaching_events").select("at, student_id, after, note").eq("action", "email_failed").gte("at", since).order("at", { ascending: false });
+    for (const e of data || []) items.push({ when: e.at, what: `A "${esc(e.after?.kind || "coaching")}" email to ${esc(e.after?.to || "someone")} didn't send: ${esc(e.note || "")}`, who: e.student_id ? `about ${esc(name(e.student_id))}` : "" });
+  }
+  return items.sort((a, b) => (a.when < b.when ? 1 : -1));
+}
+async function loadOverview() {
+  setAddr("#team/coaching");
+  show("who", "overview");
+  $("title").textContent = "Coaching overview";
+  $("ov-list").innerHTML = `<p class="small">Loading…</p>`;
+  try {
+    const items = await coachingStuck();
+    $("ov-list").innerHTML = items.length
+      ? `<ul class="ov">${items.map((x) => `<li>${x.what}${x.who ? ` <span class="small">· ${x.who}</span>` : ""}</li>`).join("")}</ul>
+         <p class="small">Open <button class="link" id="ov-cc">Coaches Corner</button> to act on these.</p>`
+      : `<p>Nothing stuck. Every test is sent and reviewed on time, and every coaching email went.</p>`;
+    $("ov-cc")?.addEventListener("click", () => loadStudents());
+  } catch (e) { $("ov-list").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 // Live counts on the Team tiles (2026-11-25, step 2). Each count fills in on its own; one that
@@ -811,6 +871,7 @@ async function teamCounts() {
     }),
   ];
   if (admin) jobs.push(
+    coachingStuck().then((items) => put("ov-count", items.length ? `<b>${items.length}</b> to look at` : "Nothing stuck")),
     rows("feedback", "status").then((F) => {
       const nw = F.filter((r) => r.status === "new").length, open = F.filter((r) => ["new", "looking"].includes(r.status)).length;
       put("fb-count", `<b>${nw}</b> new · <b>${open}</b> open`);
@@ -2034,6 +2095,18 @@ async function loadStudents(note) {
   status("Loading…");
   const admin = me.role === "admin";
   try {
+    studentsState = await fetchCoaching();
+    drawStudents(admin);
+    drawCoachBoard();
+    status("");
+    if (note) studentsMsg(note);
+  } catch (e) { status(`Students: ${e.message}`, true); }
+}
+
+/** Links, invites, people, every assignment and test for the coach's students (admins: everyone's). */
+async function fetchCoaching() {
+  const admin = me.role === "admin";
+  {
     const mineL = (l) => l.active && (admin || l.coach_id === me.id), mineI = (i) => admin || i.coach_id === me.id;
     const [links, invites, drills] = await Promise.all([
       ctable("coach_links", (q) => (admin ? q : q.eq("coach_id", me.id)).eq("active", true), mineL),
@@ -2050,11 +2123,61 @@ async function loadStudents(note) {
     ]);
     const aIds = assignments.map((a) => a.id);
     const tests = aIds.length ? await ctable("tests", (q) => q.in("assignment_id", aIds), (t) => aIds.includes(t.assignment_id)) : [];
-    studentsState = { links, invites, people, assignments, tests };
-    drawStudents(admin);
-    status("");
-    if (note) studentsMsg(note);
-  } catch (e) { status(`Students: ${e.message}`, true); }
+    const state = { links, invites, people, assignments, tests };
+    setNeedsBadge(state);
+    return state;
+  }
+}
+
+// "Needs you" on the Coaches Corner tab (2026-11-27, step 4): your own students with a test to
+// review or a target to set (an admin's count is their own students only, not every coach's).
+function setNeedsBadge({ links, assignments, tests }) {
+  const n = links.filter((l) => l.coach_id === me.id).filter((l) => {
+    const a = assignments.find((x) => x.student_id === l.student_id && x.status === "active");
+    return ["review", "target"].includes(stepOf(a, tests, false).key);
+  }).length;
+  $("students-link").innerHTML = `Coaches Corner${n ? ` <span class="needs-badge" title="${n} student${n === 1 ? "" : "s"} waiting on you">${n}</span>` : ""}`;
+}
+
+// Scoreboard across your students (2026-11-27, step 4): each student on their current drill, from
+// drill_sets (the same scored sets as the player's own scoreboard).
+async function drawCoachBoard() {
+  const { links, people, assignments } = studentsState, admin = me.role === "admin";
+  const coachPick = admin ? $("cc-coach").value : "";
+  const list = links.filter((l) => !coachPick || l.coach_id === coachPick).map((l) => ({
+    p: people.find((x) => x.id === l.student_id) || {}, a: assignments.find((x) => x.student_id === l.student_id && x.status === "active"),
+  })).filter((r) => r.a && r.p.player_code);
+  $("coach-board-panel").hidden = !list.length;
+  if (!list.length) return;
+  const codes = list.map((r) => r.p.player_code);
+  let sets;
+  try {
+    if (mock) sets = (await fromMock("drill_sets")).filter((x) => codes.includes(x.player_code));
+    else {
+      const { data, error } = await db.from("drill_sets").select("*").in("player_code", codes).not("list_drill_id", "is", null);
+      if (error) throw error;
+      sets = data;
+    }
+  } catch (e) { $("coach-board").innerHTML = `<tr><td class="err small">Couldn't load the scoreboard: ${esc(e.message)}</td></tr>`; return; }
+  const weekAgo = isoDay(new Date(Date.now() - 6 * 864e5));
+  const score = (x, max) => (x == null ? "–" : `${fmt(x, 0)}<span class="small">/${max}</span>`);
+  const body = list.map(({ p, a }) => {
+    const mine = sets.filter((x) => x.player_code === p.player_code && x.list_drill_id === a.drill_id && x.list_level === a.drill_level)
+      .sort((x, y) => (x.drill_date + String(x.set_no).padStart(4, "0") < y.drill_date + String(y.set_no).padStart(4, "0") ? -1 : 1));
+    const prac = mine.filter((x) => !x.is_test), scored = prac.filter((x) => x.scored), values = scored.map((x) => Number(x.score));
+    const max = Number(mine[0]?.max_score) || drillOf(a)?.max_score || 1;
+    const lastDay = prac.length ? prac[prac.length - 1].drill_date : null;
+    return { html: `<tr><td><b>${esc(nameOf(people, p.id))}</b> <span class="small">${esc(p.player_code)}</span></td>
+      <td>${drillText(a)}</td>
+      <td>${prac.filter((x) => x.drill_date >= weekAgo).length || "–"}</td>
+      <td>${score(values[values.length - 1], max)}</td>
+      <td>${values.length ? score(Math.max(...values), max) : "–"}</td>
+      <td>${values.length ? `${fmt(mean(values.slice(-10)))}<span class="small">/${max}</span>` : "–"}</td>
+      <td>${boardTrend(values, max)}</td>
+      <td>${lastDay ? shortDay(lastDay) : "not yet"}</td></tr>`, last: lastDay || "" };
+  }).sort((x, y) => (x.last < y.last ? 1 : x.last > y.last ? -1 : 0)).map((r) => r.html).join("");
+  $("coach-board").innerHTML = `<tr><th>Student</th><th>Drill</th><th title="practice sets in the last 7 days">Sets this week</th><th>Last</th><th>Best</th>` +
+    `<th title="average of the last 10 scored practice sets">Last 10 avg</th><th>Trend</th><th>Last practised</th></tr>${body}`;
 }
 
 function studentsMsg(text, bad) { $("students-msg").textContent = text || ""; $("students-msg").className = bad ? "err" : "msg"; }
@@ -2129,6 +2252,17 @@ function drawStudents(admin) {
       await loadStudents(r.email_errors?.length ? `Invite renewed for 30 days, but the email didn't send: ${r.email_errors[0]}` : "Sent again; the invite is open for 30 more days.");
     } catch (e) { studentsMsg(e.message, true); }
   }));
+}
+
+/** The "test is in" email links to #coaches/test/<id> (2026-11-27): open that test's review under its card. */
+function openTestFromLink(testId) {
+  const t = studentsState?.tests.find((x) => x.id === testId);
+  if (!t) return studentsMsg("That test isn't one of your students' (or it was withdrawn). Here's Coaches Corner.", true);
+  const card = document.querySelector(`.scard[data-id="${CSS.escape(t.student_id)}"]`);
+  const a = studentsState.assignments.find((x) => x.id === t.assignment_id);
+  if (!card || !a || a.status !== "active") return studentsMsg("That test's drill has ended; see the student's History.", true);
+  card.after($("review-box"));
+  openReview({ p: studentsState.people.find((x) => x.id === t.student_id) || { id: t.student_id }, a });
 }
 
 // ---- Coach-only undo and the history on each card (Billy, 2026-11-27: Koby misunderstood his
@@ -2316,7 +2450,9 @@ $("coach-invite-form").onsubmit = async (e) => {
   } catch (err) { ciMsg(err.message, true); }
 };
 $("students-link").onclick = () => loadStudents();
-$("cc-coach").onchange = () => { $("assign-box").hidden = true; $("review-box").hidden = true; drawStudents(true); };
+$("ov-link").onclick = () => loadOverview();
+$("ov-back").onclick = () => loadTeam();
+$("cc-coach").onchange = () => { $("assign-box").hidden = true; $("review-box").hidden = true; drawStudents(true); drawCoachBoard(); };
 $("view-back").onclick = () => (viewFrom === "team" ? loadTeam() : loadStudents());
 $("students-back").onclick = () => { show("who", "home"); loadPlayer(); };
 
