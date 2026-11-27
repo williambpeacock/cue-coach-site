@@ -56,20 +56,24 @@ input[type=range] { accent-color: var(--accent); }
 #loadmsg { color: var(--muted); }
 #loadmsg.err { color: #e5534b; }
 .back { color: var(--muted); font-size: 13px; }
-.twistDial { position: absolute; right: 10px; top: 30px; width: 150px; height: 172px; background: rgba(28,30,34,.82); border: 1px solid var(--line); border-radius: 10px; }
-@media (max-width: 460px) { .twistDial { width: 112px; height: 132px; } }
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.twistDial { flex: none; width: 130px; height: 116px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+@media (max-width: 460px) { .twistDial { width: 108px; height: 104px; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="label" id="subtitle"></div>
-    <h1 id="title"></h1>
+    <div>
+      <div class="label" id="subtitle"></div>
+      <h1 id="title"></h1>
+    </div>
+    <canvas class="twistDial" id="twistDial" role="img" aria-label="Cue twist dial"></canvas>
   </header>
   <div id="loadmsg" hidden></div>
 
   <div class="views">
-    <div class="stage" id="topBox"><span class="label tag">Top view</span><canvas id="top"></canvas><canvas class="twistDial" id="twistDial" role="img" aria-label="Cue twist dial"></canvas></div>
+    <div class="stage" id="topBox"><span class="label tag">Top view</span><canvas id="top"></canvas></div>
     <div class="stage" id="sideBox"><span class="label tag">Side view</span><canvas id="side"></canvas></div>
   </div>
 
@@ -103,7 +107,7 @@ input[type=range] { accent-color: var(--accent); }
     <li>The cue is drawn turning about the bridge hand, which stays put on the line of the shot, the bridge length (bridge hand to cue ball, set with the slider) in front of the ball. "Tip" numbers are the angles at the tip's distance from the bridge, so they shrink as the tip comes back toward the bridge. Only the cue's turning is measured, not the whole cue sliding sideways or up and down in the bridge.</li>
     <li>For 30 ms after contact the hit shakes the sensor, so the direction is held still there (the grey band on the chart).</li>
     <li>Left and right are as the shooter sees them, standing behind the cue (confirmed with deliberate steers, 2026-11-07). In the top view the shooter's left is up the screen.</li>
-    <li>The twist dial (top right) is the butt of the cue seen from behind: the needle turns as far as the cue has rolled since the start of the stroke, clockwise = right. Its ring is the twist cards' limits (low under 5°, high over 15° before contact; 8° and 20° after). It counts the backswing roll too, so it can read more than the cards.</li>
+    <li>The twist dial (top right, above the views) is the butt of the cue seen from behind: the needle turns as far as the cue has rolled since the start of the stroke, clockwise = right. Its ring is the twist cards' limits (low under 5°, high over 15° before contact; 8° and 20° after). It counts the backswing roll too, so it can read more than the cards.</li>
   </ul>
   <div class="file" id="file"></div>
 </div>
@@ -321,7 +325,7 @@ function readout() {
   $("rW").textContent = sgn(f[4]) + "°";
 }
 
-// Twist dial (Billy, 2026-11-26): the butt of the cue seen from behind; the needle is a mark on the cue
+// Twist dial (Billy, 2026-11-26; above the views, off the drawing, so it never covers the tip): the butt of the cue seen from behind; the needle is a mark on the cue
 // and turns by how far the cue has rolled since the start of the stroke (+ = clockwise = right, as the
 // twist cards count it). The ring is the cards' low / medium / high limits, before or after contact.
 // It counts from the start of the stroke, so it includes backswing roll; the cards don't.
@@ -331,26 +335,27 @@ function drawTwistDial() {
   c.width = W * dpr; c.height = H * dpr; const g = c.getContext("2d"); g.scale(dpr, dpr);
   const frames = F(), f = frames[idx], tw = f[4] - frames[0][4];
   const after = f[0] > 0, lo = after ? D.low_after : D.low_before, hi = after ? D.high_after : D.high_before;
-  const cx = W / 2, cy = W / 2 + 18, r = W * 0.36;
-  g.textAlign = "center"; g.font = "700 9px " + S.page.font; g.fillStyle = S.page.muted;
+  const r = W * 0.36, cx = W / 2, cy = 24 + r + 10;   // top half only: 90 deg either way
+  g.textAlign = "center"; g.font = "700 " + (W < 120 ? 8 : 9) + "px " + S.page.font; g.fillStyle = S.page.muted;
   g.fillText("TWIST " + (after ? "AFTER" : "BEFORE") + " CONTACT", cx, 14);
   const band = (a0, a1, col) => { g.strokeStyle = col; g.lineWidth = 7; g.beginPath();
     g.arc(cx, cy, r + 6, (a0 - 90) * RAD, (a1 - 90) * RAD); g.stroke(); };
   band(-lo, lo, D.low_color); band(lo, hi, D.medium_color); band(-hi, -lo, D.medium_color);
   band(hi, 90, D.high_color); band(-90, -hi, D.high_color);
   g.fillStyle = S.page.panel; g.strokeStyle = S.page.muted; g.lineWidth = 1.5;
-  g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill(); g.stroke();
+  g.beginPath(); g.arc(cx, cy, r, Math.PI, 0); g.closePath(); g.fill(); g.stroke();
   g.lineWidth = 1; g.beginPath(); g.moveTo(cx, cy - r - 12); g.lineTo(cx, cy - r + 4); g.stroke();
-  const a = (tw - 90) * RAD, col = Math.abs(tw) < lo ? D.low_color : Math.abs(tw) < hi ? D.medium_color : D.high_color;
+  const a = (Math.max(-90, Math.min(90, tw)) - 90) * RAD,   // pinned at the ends past 90 deg; the number still says it
+    col = Math.abs(tw) < lo ? D.low_color : Math.abs(tw) < hi ? D.medium_color : D.high_color;
   const nx = cx + Math.cos(a) * (r - 4), ny = cy + Math.sin(a) * (r - 4);
   g.strokeStyle = col; g.lineWidth = 4; g.lineCap = "round";
   g.beginPath(); g.moveTo(cx, cy); g.lineTo(nx, ny); g.stroke();
   g.fillStyle = col; g.beginPath(); g.arc(nx, ny, 5, 0, 7); g.fill();
   g.fillStyle = S.page.background; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
-  g.fillStyle = S.page.text; g.font = "700 18px " + S.page.font;
-  g.fillText(Math.abs(tw) < 0.5 ? "0°" : Math.abs(tw).toFixed(1) + "° " + (tw > 0 ? "right" : "left"), cx, H - 12);
+  g.fillStyle = S.page.text; g.font = "700 " + (W < 120 ? 15 : 18) + "px " + S.page.font;
+  g.fillText(Math.abs(tw) < 0.5 ? "0°" : Math.abs(tw).toFixed(1) + "° " + (tw > 0 ? "right" : "left"), cx, cy + 28);
   g.font = "9px " + S.page.font; g.fillStyle = S.page.muted;
-  g.fillText("L", cx - r - 14, cy + 3); g.fillText("R", cx + r + 14, cy + 3);
+  g.fillText("L", cx - r - 6, cy + 12); g.fillText("R", cx + r + 6, cy + 12);
 }
 
 function render() {
