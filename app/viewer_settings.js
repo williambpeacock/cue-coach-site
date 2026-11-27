@@ -79,6 +79,17 @@ window.VIEWER_SETTINGS = {
     up_down_max: 5,
   },
 
+  twist_dial: {
+    show: true,                       // the dial in the top view's corner: how far the cue has rolled
+    low_before: 5,                    // the twist cards' limits, in degrees (low under, high over)
+    high_before: 15,
+    low_after: 8,
+    high_after: 20,
+    low_color: "#3fae6a",
+    medium_color: "#e0a030",
+    high_color: "#d9534f",
+  },
+
   playback: {
     speeds: [0.1, 0.25, 0.5, 1],      // the speed slider's steps (1 = real time)
     start_speed: 0.25,

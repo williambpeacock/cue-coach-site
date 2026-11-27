@@ -56,6 +56,8 @@ input[type=range] { accent-color: var(--accent); }
 #loadmsg { color: var(--muted); }
 #loadmsg.err { color: #e5534b; }
 .back { color: var(--muted); font-size: 13px; }
+.twistDial { position: absolute; right: 10px; top: 30px; width: 150px; height: 172px; background: rgba(28,30,34,.82); border: 1px solid var(--line); border-radius: 10px; }
+@media (max-width: 460px) { .twistDial { width: 112px; height: 132px; } }
 </style>
 </head>
 <body>
@@ -67,7 +69,7 @@ input[type=range] { accent-color: var(--accent); }
   <div id="loadmsg" hidden></div>
 
   <div class="views">
-    <div class="stage" id="topBox"><span class="label tag">Top view</span><canvas id="top"></canvas></div>
+    <div class="stage" id="topBox"><span class="label tag">Top view</span><canvas id="top"></canvas><canvas class="twistDial" id="twistDial" role="img" aria-label="Cue twist dial"></canvas></div>
     <div class="stage" id="sideBox"><span class="label tag">Side view</span><canvas id="side"></canvas></div>
   </div>
 
@@ -101,6 +103,7 @@ input[type=range] { accent-color: var(--accent); }
     <li>The cue is drawn turning about the bridge hand, which stays put on the line of the shot, the bridge length (bridge hand to cue ball, set with the slider) in front of the ball. "Tip" numbers are the angles at the tip's distance from the bridge, so they shrink as the tip comes back toward the bridge. Only the cue's turning is measured, not the whole cue sliding sideways or up and down in the bridge.</li>
     <li>For 30 ms after contact the hit shakes the sensor, so the direction is held still there (the grey band on the chart).</li>
     <li>Left and right are as the shooter sees them, standing behind the cue (confirmed with deliberate steers, 2026-11-07). In the top view the shooter's left is up the screen.</li>
+    <li>The twist dial (top right) is the butt of the cue seen from behind: the needle turns as far as the cue has rolled since the start of the stroke, clockwise = right. Its ring is the twist cards' limits (low under 5°, high over 15° before contact; 8° and 20° after). It counts the backswing roll too, so it can read more than the cards.</li>
   </ul>
   <div class="file" id="file"></div>
 </div>
@@ -119,6 +122,7 @@ const DEFAULTS = {
   trace: { sideways_color: "#e8792e", height_color: "#6fb3e0", width_px: 2.5, show_full_path_faintly: true },
   views: { top: true, side: true, chart: true, notes: true },
   enlarge: { sideways: 3, sideways_max: 5, up_down: 3, up_down_max: 5 },
+  twist_dial: { show: true, low_before: 5, high_before: 15, low_after: 8, high_after: 20, low_color: "#3fae6a", medium_color: "#e0a030", high_color: "#d9534f" },
   playback: { speeds: [0.1, 0.25, 0.5, 1], start_speed: 0.25, autoplay: false, loop: false },
   units: "in",
 };
@@ -137,7 +141,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 $("subtitle").textContent = S.text.subtitle;
 $("title").innerHTML = S.text.highlight ? esc(S.text.title).replace(esc(S.text.highlight), "<em>" + esc(S.text.highlight) + "</em>") : esc(S.text.title);
 $("topBox").hidden = !S.views.top; $("sideBox").hidden = !S.views.side;
-$("chartBox").hidden = !S.views.chart; $("notes").hidden = !S.views.notes;
+$("twistDial").hidden = !S.twist_dial.show; $("chartBox").hidden = !S.views.chart; $("notes").hidden = !S.views.notes;
 $("legSide").style.background = S.trace.sideways_color; $("legUp").style.background = S.trace.height_color;
 
 const CM = S.units === "cm", UNIT = CM ? "cm" : "in", toUnit = x => CM ? x * 2.54 : x;
@@ -317,12 +321,45 @@ function readout() {
   $("rW").textContent = sgn(f[4]) + "°";
 }
 
+// Twist dial (Billy, 2026-11-26): the butt of the cue seen from behind; the needle is a mark on the cue
+// and turns by how far the cue has rolled since the start of the stroke (+ = clockwise = right, as the
+// twist cards count it). The ring is the cards' low / medium / high limits, before or after contact.
+// It counts from the start of the stroke, so it includes backswing roll; the cards don't.
+function drawTwistDial() {
+  if (!S.twist_dial.show) return;
+  const D = S.twist_dial, c = $("twistDial"), dpr = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  c.width = W * dpr; c.height = H * dpr; const g = c.getContext("2d"); g.scale(dpr, dpr);
+  const frames = F(), f = frames[idx], tw = f[4] - frames[0][4];
+  const after = f[0] > 0, lo = after ? D.low_after : D.low_before, hi = after ? D.high_after : D.high_before;
+  const cx = W / 2, cy = W / 2 + 18, r = W * 0.36;
+  g.textAlign = "center"; g.font = "700 9px " + S.page.font; g.fillStyle = S.page.muted;
+  g.fillText("TWIST " + (after ? "AFTER" : "BEFORE") + " CONTACT", cx, 14);
+  const band = (a0, a1, col) => { g.strokeStyle = col; g.lineWidth = 7; g.beginPath();
+    g.arc(cx, cy, r + 6, (a0 - 90) * RAD, (a1 - 90) * RAD); g.stroke(); };
+  band(-lo, lo, D.low_color); band(lo, hi, D.medium_color); band(-hi, -lo, D.medium_color);
+  band(hi, 90, D.high_color); band(-90, -hi, D.high_color);
+  g.fillStyle = S.page.panel; g.strokeStyle = S.page.muted; g.lineWidth = 1.5;
+  g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill(); g.stroke();
+  g.lineWidth = 1; g.beginPath(); g.moveTo(cx, cy - r - 12); g.lineTo(cx, cy - r + 4); g.stroke();
+  const a = (tw - 90) * RAD, col = Math.abs(tw) < lo ? D.low_color : Math.abs(tw) < hi ? D.medium_color : D.high_color;
+  const nx = cx + Math.cos(a) * (r - 4), ny = cy + Math.sin(a) * (r - 4);
+  g.strokeStyle = col; g.lineWidth = 4; g.lineCap = "round";
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(nx, ny); g.stroke();
+  g.fillStyle = col; g.beginPath(); g.arc(nx, ny, 5, 0, 7); g.fill();
+  g.fillStyle = S.page.background; g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill();
+  g.fillStyle = S.page.text; g.font = "700 18px " + S.page.font;
+  g.fillText(Math.abs(tw) < 0.5 ? "0°" : Math.abs(tw).toFixed(1) + "° " + (tw > 0 ? "right" : "left"), cx, H - 12);
+  g.font = "9px " + S.page.font; g.fillStyle = S.page.muted;
+  g.fillText("L", cx - r - 14, cy + 3); g.fillText("R", cx + r + 14, cy + 3);
+}
+
 function render() {
   $("scrub").value = Math.round(idx / (F().length - 1) * 1000);
   if (S.views.top) drawView($("top"), "top");
   if (S.views.side) drawView($("side"), "side");
   if (S.views.chart) drawChart();
   readout();
+  drawTwistDial();
 }
 
 function reset() {
