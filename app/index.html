@@ -173,6 +173,12 @@ details.month-fold > summary .small { color: var(--muted); }
 .scard .sname { font-family: var(--display); font-weight: 500; font-size: 18px; }
 .scard .acts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: auto; padding-top: 6px; }
 .scards > .assign { grid-column: 1 / -1; }
+.shist { font-size: 14px; }
+.shist summary { font-size: 13px; }
+.shist ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.shist ul ul { margin: 2px 0 0; gap: 0; }
+.tag.withdrawn, .tag.redone, .tag.closed { color: var(--muted); }
+.tag.passed { color: #a6e3a1; }
 .scards > .empty { grid-column: 1 / -1; }
 .cc-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .assign { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -1823,6 +1829,10 @@ function mockCoaching(b) {
     (mockC.coach_comments ||= []).push({ id: `m-c${Date.now()}`, test_id: t.id, student_id: t.student_id, assignment_id: t.assignment_id, author_id: me.id, body, created_at: now });
   } else if (b.action === "review") {
     const t = mockC.tests.find((x) => x.id === b.test_id); t.reviewed_at ||= now;
+  } else if (b.action === "withdraw" || b.action === "redo_baseline") {
+    const a = mockC.assignments.find((x) => x.id === b.assignment_id);
+    Object.assign(a, { status: b.action === "withdraw" ? "withdrawn" : "redone", ended_at: now });
+    if (b.action === "redo_baseline") mockC.assignments.push({ ...a, id: `m-a${Date.now()}`, status: "active", ended_at: null, created_at: now, target_set_at: null, score_goal: null });
   } else if (b.action === "pass" || b.action === "close") {
     mockC.assignments.find((x) => x.id === b.assignment_id).status = b.action === "pass" ? "passed" : "closed";
   }
@@ -2035,7 +2045,8 @@ async function loadStudents(note) {
     const ids = [...new Set([...studentIds, ...links.map((l) => l.coach_id), ...invites.map((i) => i.coach_id), ...invites.map((i) => i.student_id).filter(Boolean)])];
     const [people, assignments] = await Promise.all([
       ids.length ? ctable("profiles", (q) => q.in("id", ids), (p) => ids.includes(p.id)) : [],
-      studentIds.length ? ctable("assignments", (q) => q.in("student_id", studentIds).eq("status", "active"), (a) => studentIds.includes(a.student_id) && a.status === "active") : [],
+      // Every assignment, for the history on each card (2026-11-27); the active one drives the card.
+      studentIds.length ? ctable("assignments", (q) => q.in("student_id", studentIds).order("created_at", { ascending: false }), (a) => studentIds.includes(a.student_id)) : [],
     ]);
     const aIds = assignments.map((a) => a.id);
     const tests = aIds.length ? await ctable("tests", (q) => q.in("assignment_id", aIds), (t) => aIds.includes(t.assignment_id)) : [];
@@ -2066,8 +2077,9 @@ function drawStudents(admin) {
   const order = { review: 0, target: 1, due: 2, testing: 3, baseline: 4, none: 5, practice: 6 };
   const rowsOut = links.map((l) => {
     const p = people.find((x) => x.id === l.student_id) || { id: l.student_id };
-    const a = assignments.filter((x) => x.student_id === l.student_id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
-    return { l, p, a, step: stepOf(a, tests, false) };
+    const mine = assignments.filter((x) => x.student_id === l.student_id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1));
+    const a = mine.find((x) => x.status === "active");
+    return { l, p, a, past: mine.filter((x) => x !== a), step: stepOf(a, tests, false) };
   }).sort((x, y) => order[x.step.key] - order[y.step.key] || nameOf(people, x.p.id).localeCompare(nameOf(people, y.p.id)));
   const needs = (r) => ["review", "target"].includes(r.step.key);
   const nNeeds = rowsOut.filter(needs).length;
@@ -2084,7 +2096,10 @@ function drawStudents(admin) {
       <div class="small">${admin ? `Coach ${esc(nameOf(people, l.coach_id))} · ` : ""}student since ${when(l.created_at)}${t ? ` · last test ${shortDay(t.started_at)}` : ""}</div>
       <div class="acts">${t ? (needs(r) ? `<button class="primary st-review">Review test</button>` : `<button class="link st-review">Last test</button>`) : ""}
         ${p.player_code ? `<button class="link st-shots">Open log</button>` : ""}
-        <button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button></div>
+        <button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button>
+        ${canRedo(a, tests) ? `<button class="link st-redo" title="Throw out this baseline and have them shoot it again">Redo baseline…</button>` : ""}
+        ${a ? `<button class="link st-withdraw" title="Take this drill off their phone">Withdraw drill…</button>` : ""}</div>
+      ${historyHtml(r, tests)}
     </div>`;
   }).join("") : `<p class="small empty">${coachPick ? "No students for this coach." : "No students yet: invite one at the bottom of the page. They appear here once they accept."}</p>`;
   $("student-cards").querySelectorAll(".scard").forEach((card) => {
@@ -2093,6 +2108,8 @@ function drawStudents(admin) {
     card.querySelector(".st-shots")?.addEventListener("click", () => openStudentLog(r.p));
     card.querySelector(".st-assign").onclick = () => { under($("assign-box")); openAssign(r); };
     card.querySelector(".st-review")?.addEventListener("click", () => { under($("review-box")); openReview(r); });
+    card.querySelector(".st-withdraw")?.addEventListener("click", () => undoAssignment(r, "withdraw"));
+    card.querySelector(".st-redo")?.addEventListener("click", () => undoAssignment(r, "redo_baseline"));
   });
 
   const STATUS = { sent: "Waiting", accepted: "Accepted", declined: "Declined", expired: "Expired" };
@@ -2112,6 +2129,47 @@ function drawStudents(admin) {
       await loadStudents(r.email_errors?.length ? `Invite renewed for 30 days, but the email didn't send: ${r.email_errors[0]}` : "Sent again; the invite is open for 30 more days.");
     } catch (e) { studentsMsg(e.message, true); }
   }));
+}
+
+// ---- Coach-only undo and the history on each card (Billy, 2026-11-27: Koby misunderstood his
+// baseline; "I don't want the student to be able to throw out a drill. That should be reserved for
+// the coach."). The cloud refuses both for students and while a test is being shot.
+/** Redo baseline: before the target is set, once a baseline has been sent. */
+const canRedo = (a, tests) => !!a && !a.target_set_at && tests.some((t) => t.assignment_id === a.id && t.status !== "in_progress");
+const ENDED = { passed: "Passed", closed: "Closed", withdrawn: "Withdrawn", redone: "Baseline redone", active: "Current" };
+
+async function undoAssignment({ p, a }, action) {
+  const name = nameOf(studentsState.people, p.id), drill = drillOf(a)?.name || a.drill_id;
+  if (studentsState.tests.some((t) => t.assignment_id === a.id && t.status === "in_progress")) {
+    return studentsMsg(`${name} is shooting a test on ${drill} right now. Try again once it's sent.`, true);
+  }
+  const ask = action === "withdraw"
+    ? `Withdraw ${drill}, level ${a.drill_level} from ${name}?\n\nIt comes off their phone; their shots and tests stay. They get an email.\n\nA note for them (optional):`
+    : `Have ${name} shoot the baseline on ${drill}, level ${a.drill_level} again?\n\nThe first baseline stays in the history; the new one is used for the target. They get an email.\n\nA note for them (optional), e.g. what to do differently:`;
+  const reason = prompt(ask, "");
+  if (reason === null) return;
+  studentsMsg("Saving…");
+  try {
+    const r = await coachingCall({ action, assignment_id: a.id, ...(reason.trim() ? { reason: reason.trim() } : {}) });
+    const mailed = r.email_errors?.length ? ` The email didn't send: ${r.email_errors[0]}` : " They've been emailed.";
+    await loadStudents((action === "withdraw" ? `${drill} withdrawn from ${name}.` : `${name} will shoot the ${drill} baseline again.`) + mailed);
+  } catch (e) { studentsMsg(e.message, true); }
+}
+
+/** Every drill the student has had with a coach, newest first, with its tests. */
+function historyHtml({ a, past }, tests) {
+  const all = [a, ...past].filter(Boolean);
+  if (!all.length) return "";
+  const testLine = (t) => `<li>${t.kind === "baseline" ? "Baseline" : "Test"} ${shortDay(t.started_at)}: ` +
+    (t.status === "in_progress" ? "being shot" : `<b>${fmt(t.score, 0)}${t.max_score ? ` of ${t.max_score}` : ""}</b>` +
+      `${t.status === "incomplete" ? `, incomplete (${t.sets_done} of ${t.sets_planned} sets)` : ""}${t.reviewed_at ? "" : ", not reviewed yet"}`) + "</li>";
+  const rows = all.map((x) => {
+    const ts = tests.filter((t) => t.assignment_id === x.id).sort((p, q) => (p.started_at < q.started_at ? -1 : 1));
+    return `<li><b>${drillText(x)}</b> <span class="tag ${esc(x.status)}">${esc(ENDED[x.status] || x.status)}</span>
+      <div class="small">${x.sets_per_test} sets a test · assigned ${shortDay(x.created_at)}${x.ended_at ? ` · ended ${shortDay(x.ended_at)}` : ""}${x.score_goal != null ? ` · goal ${fmt(x.score_goal, 0)}` : ""}</div>
+      ${ts.length ? `<ul class="small">${ts.map(testLine).join("")}</ul>` : `<div class="small">No tests shot.</div>`}</li>`;
+  }).join("");
+  return `<details class="shist"><summary>History · ${all.length} drill${all.length === 1 ? "" : "s"}</summary><ul>${rows}</ul></details>`;
 }
 
 /** The assignment's latest finished test (sent by the phone), or undefined. */
@@ -2231,6 +2289,9 @@ function openAssign({ p, a }) {
     const d = choices[Number($("as-drill").value)], sets = Number($("as-sets").value);
     if (!d) return studentsMsg("Pick a drill.", true);
     if (!(sets >= 1 && sets <= 10)) return studentsMsg("Sets per test is 1 to 10.", true);
+    // Assigning mid-test replaces the drill they're shooting (how Koby's 26 Nov mix-up began).
+    if (a && studentsState.tests.some((t) => t.assignment_id === a.id && t.status === "in_progress") &&
+        !confirm(`${name} is shooting a test on ${drillOf(a)?.name || a.drill_id} right now. Assign ${d.name} anyway? It replaces the drill they're testing on.`)) return;
     $("as-go").disabled = true;
     try {
       const r = await coachingCall({ action: "assign", student_id: p.id, drill_id: d.drill_id, level: d.level, sets_per_test: sets,
