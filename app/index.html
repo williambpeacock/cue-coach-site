@@ -167,6 +167,14 @@ details.month-fold > summary .small { color: var(--muted); }
 .step.due, .step.testing { border-color: #4d7c4d; color: #a6e3a1; }
 .tag.sent { border-color: var(--accent); color: var(--accent); } .tag.accepted { border-color: #4d7c4d; color: #a6e3a1; }
 .tag.declined, .tag.expired { color: var(--muted); }
+.scards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.scard { background: var(--panel-2); border: 1px solid transparent; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.scard.needs { border-color: var(--accent); }
+.scard .sname { font-family: var(--display); font-weight: 500; font-size: 18px; }
+.scard .acts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: auto; padding-top: 6px; }
+.scards > .assign { grid-column: 1 / -1; }
+.scards > .empty { grid-column: 1 / -1; }
+.cc-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .assign { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .assign label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 .assign .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
@@ -283,6 +291,7 @@ details summary { cursor: pointer; color: var(--accent); }
        Progress = the week-by-week charts. A session opens to its stroke list. -->
   <div id="home" hidden>
     <div style="display:flex;flex-direction:column;gap:18px">
+      <div id="view-bar" hidden><button class="link" id="view-back">← Coaches Corner</button></div>
       <div class="tabs" role="tablist">
         <button role="tab" id="tab-log" aria-selected="true">Log</button>
         <button role="tab" id="tab-progress" aria-selected="false">Progress</button>
@@ -425,7 +434,17 @@ details summary { cursor: pointer; color: var(--accent); }
   <!-- Coaching (2026-11-13, plan step 3): a coach's students and invites; admins see every coach's. -->
   <section class="panel" id="students" hidden>
     <div hidden><button class="link" id="students-back">← Training log</button></div>
-    <h2>Invite a student</h2>
+    <div id="students-msg" class="msg"></div>
+    <div class="cc-bar"><h2 id="students-head">Your students</h2>
+      <label class="small" id="cc-coach-wrap" hidden>Coach <select id="cc-coach" aria-label="Coach"></select></label></div>
+    <!-- A card per student (2026-11-27, step 3): those needing the coach first. -->
+    <div class="scards" id="student-cards"></div>
+    <div id="assign-box" class="assign" hidden></div>
+    <div id="review-box" class="assign" hidden></div>
+    <h2 style="margin-top:12px">Invites</h2>
+    <div class="table-wrap"><table id="invites-table"></table></div>
+    <!-- Invite a student at the bottom (Billy, 2026-11-27). -->
+    <h2 style="margin-top:12px">Invite a student</h2>
     <p class="small">They get an email from team@cue-coach.com. Someone without a Cue Coach login gets a link to make one.
       A student has one coach at a time: accepting your invite ends their link with any other coach.</p>
     <form id="coach-invite-form" class="invite">
@@ -433,13 +452,7 @@ details summary { cursor: pointer; color: var(--accent); }
       <label>Name <input id="ci-name" placeholder="For a new login (optional)" maxlength="100" autocomplete="off"></label>
       <div class="buttons"><button class="primary" type="submit">Send invite</button></div>
     </form>
-    <div id="students-msg" class="msg"></div>
-    <h2 style="margin-top:12px" id="students-head">Your students</h2>
-    <div class="table-wrap"><table id="students-table"></table></div>
-    <div id="assign-box" class="assign" hidden></div>
-    <div id="review-box" class="assign" hidden></div>
-    <h2 style="margin-top:12px">Invites</h2>
-    <div class="table-wrap"><table id="invites-table"></table></div>
+    <div id="ci-msg" class="msg"></div>
   </section>
 
   <section class="panel" id="leads" hidden>
@@ -626,9 +639,15 @@ const mock = new URLSearchParams(location.search).has("mock");
 const $ = (id) => document.getElementById(id);
 // Which tab each page belongs to (2026-11-25): lit in the tab row.
 const TAB_OF = { home: "home-link", day: "home-link", students: "students-link", team: "team-link", people: "team-link", leads: "team-link", stock: "team-link", dash: "team-link" };
+let viewFrom = null;  // "coaches" or "team" while showing someone else's log from there
 const show = (...ids) => {
   ["signin", "reset", "home", "day", "who", "team", "people", "students", "leads", "stock", "dash", "feedback", "report-view", "delete-account"].forEach((id) => ($(id).hidden = !ids.includes(id)));
-  const tab = ids.map((id) => TAB_OF[id]).find(Boolean);
+  // Someone else's log opened from Coaches Corner or Team keeps that tab lit, with a back link (2026-11-27).
+  const inLog = ids.some((id) => ["home", "day", "report-view"].includes(id));
+  if (!inLog) viewFrom = null;
+  const tab = inLog && viewFrom ? (viewFrom === "coaches" ? "students-link" : "team-link") : ids.map((id) => TAB_OF[id]).find(Boolean);
+  $("view-bar").hidden = !(ids.includes("home") && viewFrom);
+  $("view-back").textContent = viewFrom === "team" ? "← Team" : "← Coaches Corner";
   ["home-link", "students-link", "team-link"].forEach((t) => (t === tab ? $(t).setAttribute("aria-current", "page") : $(t).removeAttribute("aria-current")));
   $("player").classList.toggle("off", tab !== "home-link");  // the player picker belongs to the training log
   if ($("acct-menu")) closeAcct();
@@ -714,8 +733,9 @@ async function signedIn() {
     }
     const opts = players.map((p) => `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name)}</option>`).join("");
     $("player").innerHTML = opts;
-    // Admins pick a player on the Team page (2026-11-25, step 2); coaches keep the picker in the header.
-    $("player").hidden = admin || players.length < 2;
+    // Admins pick a player on the Team page (2026-11-25, step 2); coaches open a student from their
+    // card on Coaches Corner (2026-11-27, step 3). The header picker stays only as the current choice.
+    $("player").hidden = true;
     if (admin) { $("pick-player").innerHTML = `<option value="">Choose a player…</option>` + opts; $("pick-tile").hidden = players.length < 2; }
   }
   playerIds = Object.fromEntries(players.map((p) => [p.player_code, p.id]));
@@ -734,13 +754,21 @@ function route(hash) {
   routing = true;
   try {
     if (r === "coaches" && coach) return void loadStudents();
+    const v = r.match(/^(coaches|team\/log)\/([A-Za-z0-9]+)(\/progress)?$/);
+    if (v && (v[1] === "coaches" ? coach : admin) && playerIds[v[2]]) {
+      playerCode = v[2]; $("player").value = playerCode; viewFrom = v[1] === "coaches" ? "coaches" : "team";
+      show("who", "home"); showTab(v[3] ? "progress" : "log"); return void loadPlayer();
+    }
     if (r === "team" && team) return void loadTeam();
     if (r === "team/leads" && team) return void loadLeads();
     if (r === "team/inventory" && team) return void loadStock();
     if (r === "team/dashboard" && admin) return void loadDashboard();
     if (r === "team/people" && admin) return void loadPeople();
     if (r === "feedback") return void loadFeedback();
-    if ((r === "log" || r === "progress") && !leadsOnly) { show("who", "home"); return void showTab(r); }
+    if ((r === "log" || r === "progress") && !leadsOnly) {
+      if (viewFrom) { viewFrom = null; if (me.player_code && playerIds[me.player_code]) { playerCode = me.player_code; $("player").value = playerCode; loadPlayer(); } }
+      show("who", "home"); return void showTab(r);
+    }
     if (leadsOnly) return void loadTeam();
     if (role === "coach") return void loadStudents();
     show("who", "home"); showTab("log");
@@ -1233,7 +1261,8 @@ document.querySelectorAll("#perday-panel .seg button").forEach((b) => (b.onclick
 }));
 
 function showTab(which) {
-  if (!$("home").hidden) setAddr(which === "progress" ? "#progress" : "#log");
+  if (!$("home").hidden) setAddr(viewFrom ? `#${viewFrom === "team" ? "team/log" : "coaches"}/${playerCode}${which === "progress" ? "/progress" : ""}`
+    : which === "progress" ? "#progress" : "#log");
   $("tab-log").setAttribute("aria-selected", which === "log"); $("tab-progress").setAttribute("aria-selected", which === "progress");
   $("log-view").hidden = which !== "log"; $("progress-view").hidden = which !== "progress";
   if (which === "progress") drawWeeks(allWeeks);  // drawn when visible so the charts get their size
@@ -1991,7 +2020,7 @@ async function loadStudents(note) {
   setAddr("#coaches");
   show("who", "students");
   $("title").textContent = "Coaches Corner";
-  $("assign-box").hidden = true; $("review-box").hidden = true;
+  $("ci-msg").textContent = ""; $("assign-box").hidden = true; $("review-box").hidden = true;
   status("Loading…");
   const admin = me.role === "admin";
   try {
@@ -2020,27 +2049,50 @@ async function loadStudents(note) {
 function studentsMsg(text, bad) { $("students-msg").textContent = text || ""; $("students-msg").className = bad ? "err" : "msg"; }
 
 function drawStudents(admin) {
-  const { links, invites, people, assignments, tests } = studentsState;
-  $("students-head").textContent = admin ? "Students and their coaches" : "Your students";
+  const { people, assignments, tests } = studentsState;
+  // Admins see every coach's students; the coach filter narrows it to one coach (2026-11-27).
+  const coachIds = [...new Set([...studentsState.links.map((l) => l.coach_id), ...studentsState.invites.map((i) => i.coach_id)])];
+  $("cc-coach-wrap").hidden = !admin || coachIds.length < 2;
+  if (admin) {
+    const keep = $("cc-coach").value;
+    $("cc-coach").innerHTML = `<option value="">All coaches</option>` +
+      coachIds.map((id) => [id, nameOf(people, id)]).sort((x, y) => x[1].localeCompare(y[1]))
+        .map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join("");
+    $("cc-coach").value = coachIds.includes(keep) ? keep : "";
+  }
+  const coachPick = admin ? $("cc-coach").value : "";
+  const links = studentsState.links.filter((l) => !coachPick || l.coach_id === coachPick);
+  const invites = studentsState.invites.filter((i) => !coachPick || i.coach_id === coachPick);
   const order = { review: 0, target: 1, due: 2, testing: 3, baseline: 4, none: 5, practice: 6 };
   const rowsOut = links.map((l) => {
     const p = people.find((x) => x.id === l.student_id) || { id: l.student_id };
     const a = assignments.filter((x) => x.student_id === l.student_id).sort((x, y) => (x.created_at < y.created_at ? 1 : -1))[0];
     return { l, p, a, step: stepOf(a, tests, false) };
   }).sort((x, y) => order[x.step.key] - order[y.step.key] || nameOf(people, x.p.id).localeCompare(nameOf(people, y.p.id)));
-  $("students-table").innerHTML = `<tr><th>Student</th>${admin ? "<th>Coach</th>" : ""}<th>Drill</th><th>Where they are</th><th></th></tr>` +
-    (rowsOut.length ? "" : `<tr><td colspan="${admin ? 5 : 4}" class="small">No students yet: invite one above. They appear here once they accept.</td></tr>`) +
-    rowsOut.map(({ l, p, a, step }) => `<tr data-id="${esc(p.id)}">
-      <td><b>${esc(nameOf(people, p.id))}</b>${p.player_code ? ` <span class="small">${esc(p.player_code)}</span>` : ""}<br><span class="small">since ${when(l.created_at)}</span></td>
-      ${admin ? `<td>${esc(nameOf(people, l.coach_id))}</td>` : ""}
-      <td>${a ? `${drillText(a)}<br><span class="small">${a.sets_per_test} sets a test${a.score_goal != null ? ` · goal ${fmt(a.score_goal, 0)}${testMax(a) ? ` of ${testMax(a)}` : ""}` : ""}</span>` : `<span class="small">–</span>`}</td>
-      <td><span class="step ${step.key}">${esc(step.text)}</span></td>
-      <td>${lastTest(a, tests) ? `<button class="link st-review">${step.key === "review" || step.key === "target" ? "<b>Review test…</b>" : "Last test…"}</button> · ` : ""}${p.player_code ? `<button class="link st-shots">Shots</button> · ` : ""}<button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button></td></tr>`).join("");
-  $("students-table").querySelectorAll("tr[data-id]").forEach((tr) => {
-    const r = rowsOut.find((x) => x.p.id === tr.dataset.id);
-    tr.querySelector(".st-shots")?.addEventListener("click", () => openStudentLog(r.p));
-    tr.querySelector(".st-assign").onclick = () => openAssign(r);
-    tr.querySelector(".st-review")?.addEventListener("click", () => openReview(r));
+  const needs = (r) => ["review", "target"].includes(r.step.key);
+  const nNeeds = rowsOut.filter(needs).length;
+  $("students-head").textContent = (admin && !coachPick ? "Students and their coaches" : admin ? `${nameOf(people, coachPick)}'s students` : "Your students") +
+    (nNeeds ? ` · ${nNeeds} need${nNeeds === 1 ? "s" : ""} you` : "");
+  // The assign and review boxes open under a card; take them out before the cards are redrawn.
+  $("student-cards").after($("review-box")); $("student-cards").after($("assign-box"));
+  $("student-cards").innerHTML = rowsOut.length ? rowsOut.map((r) => {
+    const { l, p, a, step } = r, t = lastTest(a, tests);
+    return `<div class="scard${needs(r) ? " needs" : ""}" data-id="${esc(p.id)}">
+      <div><span class="sname">${esc(nameOf(people, p.id))}</span>${p.player_code ? ` <span class="small">${esc(p.player_code)}</span>` : ""}</div>
+      <div><span class="step ${step.key}">${esc(step.text)}</span></div>
+      <div>${a ? `${drillText(a)}<br><span class="small">${a.sets_per_test} sets a test${a.score_goal != null ? ` · goal ${fmt(a.score_goal, 0)}${testMax(a) ? ` of ${testMax(a)}` : ""}` : ""}</span>` : `<span class="small">No drill yet</span>`}</div>
+      <div class="small">${admin ? `Coach ${esc(nameOf(people, l.coach_id))} · ` : ""}student since ${when(l.created_at)}${t ? ` · last test ${shortDay(t.started_at)}` : ""}</div>
+      <div class="acts">${t ? (needs(r) ? `<button class="primary st-review">Review test</button>` : `<button class="link st-review">Last test</button>`) : ""}
+        ${p.player_code ? `<button class="link st-shots">Open log</button>` : ""}
+        <button class="link st-assign">${a ? "New drill…" : "Assign drill…"}</button></div>
+    </div>`;
+  }).join("") : `<p class="small empty">${coachPick ? "No students for this coach." : "No students yet: invite one at the bottom of the page. They appear here once they accept."}</p>`;
+  $("student-cards").querySelectorAll(".scard").forEach((card) => {
+    const r = rowsOut.find((x) => x.p.id === card.dataset.id);
+    const under = (box) => { card.after(box); };
+    card.querySelector(".st-shots")?.addEventListener("click", () => openStudentLog(r.p));
+    card.querySelector(".st-assign").onclick = () => { under($("assign-box")); openAssign(r); };
+    card.querySelector(".st-review")?.addEventListener("click", () => { under($("review-box")); openReview(r); });
   });
 
   const STATUS = { sent: "Waiting", accepted: "Accepted", declined: "Declined", expired: "Expired" };
@@ -2151,15 +2203,14 @@ async function openReview({ p, a }) {
   });
 }
 
-/** A student's training log, from the Students page (the player list above already has them). */
+/** A student's training log, from their card on Coaches Corner (address #coaches/<code>). */
 function openStudentLog(p) {
   if (![...$("player").options].some((o) => o.value === p.player_code)) {
     $("player").insertAdjacentHTML("beforeend", `<option value="${esc(p.player_code)}">${esc(p.player_code)} · ${esc(p.display_name || "")}</option>`);
     playerIds[p.player_code] = p.id;
   }
-  $("player").hidden = me.role === "admin" || $("player").options.length < 2;
   playerCode = p.player_code; $("player").value = playerCode;
-  show("who", "home"); loadPlayer();
+  viewFrom = "coaches"; show("who", "home"); showTab("log"); loadPlayer();
 }
 
 function openAssign({ p, a }) {
@@ -2191,16 +2242,21 @@ function openAssign({ p, a }) {
 
 $("coach-invite-form").onsubmit = async (e) => {
   e.preventDefault();
+  // The form is at the bottom of Coaches Corner (2026-11-27), so its messages show under it.
+  const ciMsg = (text, bad) => { $("ci-msg").textContent = text; $("ci-msg").className = bad ? "err" : "msg"; };
   const email = $("ci-email").value.trim();
-  studentsMsg("Sending…");
+  ciMsg("Sending…");
   try {
     const r = await coachingCall({ action: "invite", email, name: $("ci-name").value.trim() || undefined });
     $("ci-email").value = ""; $("ci-name").value = "";
-    await loadStudents(r.email_errors?.length ? `Invite made, but the email didn't send: ${r.email_errors[0]}. Try Send again.`
-      : `Invite sent to ${email}.${r.result?.has_login === false ? " They had no login, so the email has a link to make one." : ""}`);
-  } catch (err) { studentsMsg(err.message, true); }
+    await loadStudents();
+    if (r.email_errors?.length) ciMsg(`Invite made, but the email didn't send: ${r.email_errors[0]}. Try Send again.`, true);
+    else ciMsg(`Invite sent to ${email}.${r.result?.has_login === false ? " They had no login, so the email has a link to make one." : ""}`);
+  } catch (err) { ciMsg(err.message, true); }
 };
 $("students-link").onclick = () => loadStudents();
+$("cc-coach").onchange = () => { $("assign-box").hidden = true; $("review-box").hidden = true; drawStudents(true); };
+$("view-back").onclick = () => (viewFrom === "team" ? loadTeam() : loadStudents());
 $("students-back").onclick = () => { show("who", "home"); loadPlayer(); };
 
 $("signin-form").onsubmit = async (e) => {
@@ -2295,15 +2351,16 @@ $("delete-go").onclick = async () => {
 // Home (2026-11-09): back to the home screen from any page; staff's home is Leads, unless they also
 // play (2026-11-16): then it's their training log.
 $("home-link").onclick = () => {
-  // An admin's My Training Log tab is their own log; other players' logs open from the Team page.
-  if (me?.role === "admin" && me.player_code && playerIds[me.player_code]) { playerCode = me.player_code; $("player").value = playerCode; }
+  // My Training Log is your own log; other players' logs open from Coaches Corner or Team.
+  viewFrom = null;
+  if (me?.player_code && playerIds[me.player_code]) { playerCode = me.player_code; $("player").value = playerCode; }
   show("who", "home"); showTab("log"); loadPlayer();
 };
 $("pick-player").onchange = () => {
   const code = $("pick-player").value;
   if (!code) return;
   playerCode = code; $("player").value = code; $("pick-player").value = "";
-  show("who", "home"); showTab("log"); loadPlayer();
+  viewFrom = "team"; show("who", "home"); showTab("log"); loadPlayer();
 };
 $("signout").onclick = () => signOutHere();
 
