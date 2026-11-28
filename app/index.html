@@ -182,6 +182,16 @@ details.month-fold > summary .small { color: var(--muted); }
 .scards > .empty { grid-column: 1 / -1; }
 .needs-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--accent); color: #111; font-size: 12px; font-weight: 700; line-height: 18px; text-align: center; }
 #coach-board td, #coach-board th { text-align: left; white-space: normal; vertical-align: top; }
+.dcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.dcard { display: flex; gap: 14px; background: var(--panel-2); border-radius: 12px; padding: 12px; min-width: 0;
+  --rail: #41454d; --felt: #2e4a42; --pocket: #0e0f11; --orange: var(--accent); }
+.dcard .dtable { flex: 0 0 96px; }
+.dcard .dtable svg { display: block; width: 96px; height: auto; }
+.dcard .dinfo { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 14px; }
+.dcard .sname { font-family: var(--display); font-weight: 500; font-size: 17px; }
+.dlevels { display: flex; flex-wrap: wrap; gap: 6px; }
+.dlevels button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; }
+.dlevels button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 ul.ov { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
 .cc-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .assign { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -464,6 +474,15 @@ details summary { cursor: pointer; color: var(--accent); }
       <p class="small">Each student's practice on their current drill, most recently practised first.</p>
       <div class="table-wrap"><table id="coach-board"></table></div>
     </div>
+    <!-- Drill list (Billy, 2026-11-27: "Coaches corner needs to see a list of drills"): every drill on the
+         Cue Coach list with its table, from the drills table (drawn by drill_table.js, as Drill Manager). -->
+    <div id="drill-lib-panel" hidden>
+      <div class="cc-bar" style="margin-top:12px"><h2 id="drill-lib-head">Drill list</h2>
+        <input type="search" id="dl-search" placeholder="Search drills" aria-label="Search drills">
+        <select id="dl-type" aria-label="Shot type"><option value="">All shot types</option></select></div>
+      <p class="small">Every drill on the Cue Coach list. Pick a level to see its layout; assign one from a student's card.</p>
+      <div class="dcards" id="drill-lib"></div>
+    </div>
     <h2 style="margin-top:12px">Invites</h2>
     <div class="table-wrap"><table id="invites-table"></table></div>
     <!-- Invite a student at the bottom (Billy, 2026-11-27). -->
@@ -644,6 +663,7 @@ details summary { cursor: pointer; color: var(--accent); }
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="drill_table.js" defer></script>
 <script src="dashboard.js" defer></script>
 <script src="feedback.js" defer></script>
 <script src="config.js" onerror="window.CUE_CONFIG_MISSING = true"></script>
@@ -2098,6 +2118,7 @@ async function loadStudents(note) {
     studentsState = await fetchCoaching();
     drawStudents(admin);
     drawCoachBoard();
+    drawDrillList();
     status("");
     if (note) studentsMsg(note);
   } catch (e) { status(`Students: ${e.message}`, true); }
@@ -2263,6 +2284,46 @@ function openTestFromLink(testId) {
   if (!card || !a || a.status !== "active") return studentsMsg("That test's drill has ended; see the student's History.", true);
   card.after($("review-box"));
   openReview({ p: studentsState.people.find((x) => x.id === t.student_id) || { id: t.student_id }, a });
+}
+
+// ---- Drill list on Coaches Corner (2026-11-27): the newest active version of each drill and level.
+const dlLevel = {};  // drill_id -> level shown
+function drawDrillList() {
+  const latest = new Map();
+  for (const d of drillList.filter((x) => x.active)) {
+    const k = `${d.drill_id}|${d.level}`;
+    if (!latest.has(k) || latest.get(k).version < d.version) latest.set(k, d);
+  }
+  const byDrill = new Map();
+  [...latest.values()].sort((a, b) => a.drill_id.localeCompare(b.drill_id) || a.level - b.level)
+    .forEach((d) => { if (!byDrill.has(d.drill_id)) byDrill.set(d.drill_id, []); byDrill.get(d.drill_id).push(d); });
+  $("drill-lib-panel").hidden = !byDrill.size;
+  const types = [...new Set([...latest.values()].map((d) => d.shot_type).filter(Boolean))].sort();
+  const keepType = $("dl-type").value;
+  $("dl-type").innerHTML = `<option value="">All shot types</option>` + types.map((t) => `<option>${esc(t)}</option>`).join("");
+  $("dl-type").value = types.includes(keepType) ? keepType : "";
+  const q = $("dl-search").value.trim().toLowerCase(), type = $("dl-type").value;
+  const shown = [...byDrill.entries()].filter(([, levels]) => (!type || levels.some((d) => d.shot_type === type)) &&
+    (!q || levels.some((d) => [d.drill_id, d.name, d.shot_type, d.scoring, d.description, d.credit, (d.key_metrics || []).join(" ")].join(" ").toLowerCase().includes(q))));
+  $("drill-lib-head").textContent = `Drill list · ${byDrill.size} drills`;
+  const metric = (m) => esc(String(m).replace(/_/g, " "));
+  $("drill-lib").innerHTML = shown.length ? shown.map(([id, levels]) => {
+    const d = levels.find((x) => x.level === dlLevel[id]) || levels[0];
+    const spec = { ...(d.spec || {}), pocket: d.spec?.pocket ?? d.pocket, shot_type: d.shot_type };
+    return `<div class="dcard" data-drill="${esc(id)}">
+      <div class="dtable">${window.drillTableSvg ? window.drillTableSvg(spec) : ""}</div>
+      <div class="dinfo">
+        <div><span class="small">${esc(id)}</span> <span class="sname">${esc(d.name)}</span></div>
+        ${levels.length > 1 ? `<div class="dlevels">${levels.map((x) => `<button data-level="${x.level}" aria-pressed="${x.level === d.level}">Level ${x.level}</button>`).join("")}</div>` : `<div class="small">Level ${d.level}</div>`}
+        <div class="small">${[d.shot_type, d.scoring, `${d.shots} shots`, d.max_score ? `best ${d.max_score} a set` : ""].filter(Boolean).map(esc).join(" · ")}</div>
+        ${d.description ? `<div>${esc(d.description)}</div>` : ""}
+        <div class="small">${(d.key_metrics || []).length ? `Key metrics: ${d.key_metrics.map(metric).join(", ")}` : ""}${d.credit ? `${(d.key_metrics || []).length ? " · " : ""}From ${esc(d.credit)}` : ""}</div>
+        ${ASSIGNABLE.includes(d.scoring) ? "" : `<div class="small">Can't be assigned yet (${esc(d.scoring)} scoring); players can still practise it.</div>`}
+      </div></div>`;
+  }).join("") : `<p class="small">No drills match.</p>`;
+  $("drill-lib").querySelectorAll(".dlevels button").forEach((b) => (b.onclick = () => {
+    dlLevel[b.closest(".dcard").dataset.drill] = Number(b.dataset.level); drawDrillList();
+  }));
 }
 
 // ---- Coach-only undo and the history on each card (Billy, 2026-11-27: Koby misunderstood his
@@ -2451,6 +2512,8 @@ $("coach-invite-form").onsubmit = async (e) => {
 };
 $("students-link").onclick = () => loadStudents();
 $("ov-link").onclick = () => loadOverview();
+$("dl-search").oninput = () => drawDrillList();
+$("dl-type").onchange = () => drawDrillList();
 $("ov-back").onclick = () => loadTeam();
 $("cc-coach").onchange = () => { $("assign-box").hidden = true; $("review-box").hidden = true; drawStudents(true); drawCoachBoard(); };
 $("view-back").onclick = () => (viewFrom === "team" ? loadTeam() : loadStudents());
